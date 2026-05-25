@@ -1,0 +1,73 @@
+{
+	"version": 1,
+	"commonTranslations": [
+		{ "source": "Search...", "target": "搜索..." },
+		{ "source": "Add a node", "target": "添加节点" },
+		{ "source": "Close (Escape)", "target": "关闭 (Escape)" },
+		{ "source": "Copy to Clipboard", "target": "复制到剪贴板" },
+		{ "source": "Copy to clipboard", "target": "复制到剪贴板" },
+		{ "source": "Upload", "target": "上传" },
+		{ "source": "Delete", "target": "删除" },
+		{ "source": "Remove", "target": "移除" },
+		{ "source": "Add...", "target": "添加..." },
+		{ "source": "Load", "target": "加载" },
+		{ "source": "Save", "target": "保存" },
+		{ "source": "Help", "target": "帮助" },
+		{ "source": "Reset to default", "target": "重置为默认值" },
+		{ "source": "Zoom to fit", "target": "缩放至适合" },
+		{ "source": "Snippet ID", "target": "片段 ID" },
+		{ "source": "Load from snippet server", "target": "从片段服务器加载" },
+		{ "source": "Save to snippet server", "target": "保存到片段服务器" },
+		{ "source": "Open preview in new window", "target": "在新窗口打开预览" },
+		{ "source": "Options", "target": "选项" },
+		{ "source": "Save to snippet", "target": "保存到片段" },
+		{ "source": "Load from snippet", "target": "从片段加载" },
+		{ "source": "Loading...", "target": "加载中..." }
+	],
+	"packages": [
+		{
+			"name": "babylonjs-node-editor",
+			"files": ["babylon.nodeEditor.js", "babylon.nodeEditor.max.js", "babylon.nodeEditor.js.map"],
+			"translations": [
+				{ "source": "Add Custom Frame", "target": "添加自定义分组" },
+				{ "source": "Load Frame", "target": "加载分组" },
+				{ "source": "Node material build successful", "target": "节点材质构建成功" },
+				{ "source": "Unable to load your node material:", "target": "无法加载节点材质：" },
+				{ "source": "Error Saving Frame", "target": "保存分组失败" },
+				{ "source": "Error Saving Block", "target": "保存块失败" },
+				{ "source": "Export shader for SFE", "target": "导出 SFE 着色器" },
+				{ "source": "Export shaders", "target": "导出着色器" },
+				{ "source": "Preview with a custom mesh", "target": "使用自定义网格预览" }
+			]
+		},
+		{
+			"name": "babylonjs-gui-editor",
+			"files": ["babylon.guiEditor.js", "babylon.guiEditor.max.js", "babylon.guiEditor.js.map"],
+			"translations": [
+				{ "source": "Save selected control", "target": "保存选中控件" },
+				{ "source": "Load control", "target": "加载控件" },
+				{ "source": "Copy Selected", "target": "复制选中项" },
+				{ "source": "Paste", "target": "粘贴" },
+				{ "source": "Unable to load your GUI", "target": "无法加载 GUI" },
+				{ "source": "Unable to save your GUI", "target": "无法保存 GUI" },
+				{ "source": "Unable to save your selected Control", "target": "无法保存选中控件" },
+				{ "source": "GUI Editor runs only on desktop", "target": "GUI 编辑器仅支持桌面端" },
+				{ "source": "Error: control type not recognized", "target": "错误：无法识别控件类型" }
+			]
+		},
+		{
+			"name": "babylonjs-node-particle-editor",
+			"files": ["babylon.nodeParticleEditor.js", "babylon.nodeParticleEditor.max.js", "babylon.nodeParticleEditor.js.map"],
+			"translations": [
+				{ "source": "Unable to load your node particle system set:", "target": "无法加载节点粒子系统集：" },
+				{ "source": "Node Particle System Set build successful", "target": "节点粒子系统集构建成功" },
+				{ "source": "Failed to load image", "target": "图片加载失败" },
+				{ "source": "Block is using cached data", "target": "块正在使用缓存数据" },
+				{ "source": "(*) Texture data will NOT be serialized by default", "target": "（*）默认不会序列化纹理数据" },
+				{ "source": "Display in the Inspector", "target": "在检查器中显示" },
+				{ "source": "Inspector Group", "target": "检查器分组" },
+				{ "source": "Create particle", "target": "创建粒子" }
+			]
+		}
+	]
+}

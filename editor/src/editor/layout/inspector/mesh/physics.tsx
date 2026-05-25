@@ -1,0 +1,212 @@
+import { shell } from "electron";
+
+import { Component, ReactNode } from "react";
+
+import { Divider } from "@blueprintjs/core";
+
+import { AbstractMesh, PhysicsAggregate, PhysicsShape, PhysicsShapeType, PhysicsMotionType, PhysicsMassProperties, Mesh } from "babylonjs";
+
+import { registerUndoRedo } from "../../../../tools/undoredo";
+import { getPhysicsShapeForMesh } from "../../../../tools/physics/shape";
+import { isInstancedMesh, isMesh } from "../../../../tools/guards/nodes";
+
+import { EditorInspectorSwitchField } from "../fields/switch";
+import { EditorInspectorNumberField } from "../fields/number";
+import { EditorInspectorSectionField } from "../fields/section";
+import { EditorInspectorListField, IEditorInspectorListFieldItem } from "../fields/list";
+
+export interface IEditorMeshPhysicsInspectorProps {
+	mesh: AbstractMesh;
+}
+
+export class EditorMeshPhysicsInspector extends Component<IEditorMeshPhysicsInspectorProps> {
+	public render(): ReactNode {
+		const o = {
+			hasPhysicsBody: (this.props.mesh.physicsBody ?? null) !== null,
+		};
+
+		return (
+			<EditorInspectorSectionField
+				title="物理"
+				tooltip={
+					<div>
+						Configure physics using Havok. Can be used also for{" "}
+						<b
+							className="underline underline-offset-2"
+							onClick={() => shell.openExternal("https://doc.babylonjs.com/features/featuresDeepDive/physics/characterController")}
+						>
+							advanced collisions
+						</b>
+						.
+					</div>
+				}
+			>
+				<EditorInspectorSwitchField object={o} property="hasPhysicsBody" label="启用" noUndoRedo onChange={() => this._handleHasPhysicsAggregateChange()} />
+
+				{this.props.mesh.physicsAggregate && this._getPhysicsInspector(this.props.mesh.physicsAggregate)}
+			</EditorInspectorSectionField>
+		);
+	}
+
+	private _handleHasPhysicsAggregateChange(): void {
+		const aggregate = this.props.mesh.physicsAggregate;
+
+		registerUndoRedo({
+			executeRedo: true,
+			undo: () => {
+				this.props.mesh.physicsAggregate = aggregate;
+				this.props.mesh.physicsBody = aggregate?.body ?? null;
+			},
+			redo: () => {
+				if (aggregate) {
+					this.props.mesh.physicsBody = null;
+					this.props.mesh.physicsAggregate = null;
+
+					if (this.props.mesh.metadata.physicsAggregate) {
+						delete this.props.mesh.metadata.physicsAggregate;
+					}
+				} else {
+					const aggregate = new PhysicsAggregate(this.props.mesh, getPhysicsShapeForMesh(this.props.mesh), {
+						mass: 1,
+					});
+					aggregate.body.disableSync = true;
+
+					this.props.mesh.physicsAggregate = aggregate;
+				}
+			},
+		});
+
+		this.forceUpdate();
+	}
+
+	private _getPhysicsInspector(aggregate: PhysicsAggregate): ReactNode {
+		const material = aggregate.shape.material;
+		const massProperties = aggregate.body.getMassProperties();
+
+		const setMassProperties = (properties: Partial<PhysicsMassProperties>) => {
+			aggregate.body.setMassProperties({
+				...aggregate.body.getMassProperties(),
+				...properties,
+			});
+		};
+
+		return (
+			<>
+				<Divider />
+
+				{this._getShapeTypeInspector(aggregate)}
+				{this._getBodyMotionTypeInspeector(aggregate)}
+
+				<Divider />
+
+				{aggregate.body.getMotionType() !== PhysicsMotionType.STATIC && (
+					<EditorInspectorNumberField
+						noUndoRedo
+						object={massProperties}
+						property="mass"
+						label="质量"
+						min={0}
+						onFinishChange={(value, oldValue) => {
+							registerUndoRedo({
+								executeRedo: true,
+								undo: () => setMassProperties({ mass: oldValue }),
+								redo: () => setMassProperties({ mass: value }),
+							});
+
+							this.forceUpdate();
+						}}
+					/>
+				)}
+
+				<EditorInspectorNumberField object={material} property="friction" label="摩擦力" min={0} max={1} />
+				<EditorInspectorNumberField object={material} property="restitution" label="弹性恢复" min={0} max={1} />
+			</>
+		);
+	}
+
+	private _getShapeTypeInspector(aggregate: PhysicsAggregate): ReactNode {
+		const o = {
+			type: aggregate.shape.type,
+		};
+
+		const items: IEditorInspectorListFieldItem[] = [
+			{ text: "盒体", value: PhysicsShapeType.BOX },
+			{ text: "球体", value: PhysicsShapeType.SPHERE },
+			{ text: "胶囊体", value: PhysicsShapeType.CAPSULE },
+			{ text: "圆柱体", value: PhysicsShapeType.CYLINDER },
+			{ text: "网格", value: PhysicsShapeType.MESH },
+		];
+
+		const configureShape = (value: PhysicsShapeType) => {
+			let mesh: Mesh | undefined = undefined;
+			if (isInstancedMesh(this.props.mesh)) {
+				mesh = this.props.mesh.sourceMesh;
+			} else if (isMesh(this.props.mesh)) {
+				mesh = this.props.mesh;
+			}
+
+			aggregate.shape = new PhysicsShape(
+				{
+					type: value,
+					parameters: {
+						mesh: value === PhysicsShapeType.MESH ? mesh : undefined,
+					},
+				},
+				this.props.mesh.getScene()
+			);
+
+			aggregate.body.disableSync = true;
+		};
+
+		return (
+			<EditorInspectorListField
+				noUndoRedo
+				object={o}
+				property="type"
+				label="形状类型"
+				items={items}
+				onChange={(value, oldValue) => {
+					registerUndoRedo({
+						executeRedo: true,
+						undo: () => configureShape(oldValue),
+						redo: () => configureShape(value),
+					});
+				}}
+			/>
+		);
+	}
+
+	private _getBodyMotionTypeInspeector(aggregate: PhysicsAggregate): ReactNode {
+		const o = {
+			type: aggregate.body.getMotionType(),
+		};
+
+		const configureMotionType = (value: PhysicsMotionType) => {
+			aggregate.body.setMotionType(value);
+			aggregate.body.disableSync = true;
+		};
+
+		return (
+			<EditorInspectorListField
+				noUndoRedo
+				object={o}
+				property="type"
+				label="形状类型"
+				items={[
+					{ text: "静态", value: PhysicsMotionType.STATIC },
+					{ text: "动态", value: PhysicsMotionType.DYNAMIC },
+					{ text: "动画", value: PhysicsMotionType.ANIMATED },
+				]}
+				onChange={(value, oldValue) => {
+					registerUndoRedo({
+						executeRedo: true,
+						undo: () => configureMotionType(oldValue),
+						redo: () => configureMotionType(value),
+					});
+
+					this.forceUpdate();
+				}}
+			/>
+		);
+	}
+}
