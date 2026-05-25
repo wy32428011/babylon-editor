@@ -36,7 +36,7 @@ import { projectConfiguration } from "../../../../project/configuration";
 export async function tryConvertSceneFile(absolutePath: string, progress?: (percent: number) => void) {
 	const toolsUrl = process.env.EDITOR_TOOLS_URL ?? "https://editor.babylonjs.com";
 	const buffer = (await readFile(absolutePath)) as Buffer;
-	const blob = new Blob([buffer], { type: "application/octet-stream" });
+	const blob = new Blob([new Uint8Array(buffer)], { type: "application/octet-stream" });
 	const file = new File([blob], basename(absolutePath), { type: "application/octet-stream" });
 
 	const form = new FormData();

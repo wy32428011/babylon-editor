@@ -417,22 +417,44 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		if (isCamera(selectedNode)) {
 			target = selectedNode.globalPosition;
 		} else if (isAbstractMesh(selectedNode)) {
-			selectedNode.refreshBoundingInfo({
-				applyMorph: true,
-				applySkeleton: true,
-				updatePositionsArray: true,
-			});
+			const bounds = selectedNode.getTotalVertices() > 0 ? null : this._getNodeHierarchyBounds(selectedNode);
+			if (bounds) {
+				position = getCameraFocusPositionFor(bounds.center, camera, {
+					distance: 2,
+					minimum: bounds.minimum,
+					maximum: bounds.maximum,
+				});
+				target = bounds.center;
+			} else {
+				selectedNode.refreshBoundingInfo({
+					applyMorph: true,
+					applySkeleton: true,
+					updatePositionsArray: true,
+				});
 
-			const bb = selectedNode.getBoundingInfo();
-			const center = bb.boundingSphere.centerWorld;
+				const bb = selectedNode.getBoundingInfo();
+				const center = bb.boundingSphere.centerWorld;
 
-			position = getCameraFocusPositionFor(center, camera, {
-				distance: 2,
-				minimum: selectedNode.geometry ? bb.boundingBox.minimumWorld : new Vector3(-75, -75, -75),
-				maximum: selectedNode.geometry ? bb.boundingBox.maximumWorld : new Vector3(75, 75, 75),
-			});
-			target = bb.boundingBox.centerWorld;
-		} else if (isLight(selectedNode) || isAnyTransformNode(selectedNode)) {
+				position = getCameraFocusPositionFor(center, camera, {
+					distance: 2,
+					minimum: selectedNode.geometry ? bb.boundingBox.minimumWorld : new Vector3(-75, -75, -75),
+					maximum: selectedNode.geometry ? bb.boundingBox.maximumWorld : new Vector3(75, 75, 75),
+				});
+				target = bb.boundingBox.centerWorld;
+			}
+		} else if (isAnyTransformNode(selectedNode)) {
+			const bounds = this._getNodeHierarchyBounds(selectedNode);
+			if (bounds) {
+				position = getCameraFocusPositionFor(bounds.center, camera, {
+					distance: 2,
+					minimum: bounds.minimum,
+					maximum: bounds.maximum,
+				});
+				target = bounds.center;
+			} else {
+				target = selectedNode.getAbsolutePosition();
+			}
+		} else if (isLight(selectedNode)) {
 			target = selectedNode.getAbsolutePosition();
 		} else if (isAnyParticleSystem(selectedNode)) {
 			if (isAbstractMesh(selectedNode.emitter)) {
@@ -464,6 +486,43 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 
 			Tween.create(camera, 0.5, tweenConfiguration);
 		}
+	}
+
+	/**
+	 * 计算节点层级下所有子网格的聚合包围盒，用于聚焦没有几何体的模型根节点。
+	 */
+	private _getNodeHierarchyBounds(node: Node): { minimum: Vector3; maximum: Vector3; center: Vector3 } | null {
+		const getChildMeshes = (node as { getChildMeshes?: (directDescendantsOnly?: boolean) => AbstractMesh[] }).getChildMeshes;
+		if (!getChildMeshes) {
+			return null;
+		}
+
+		let minimum: Vector3 | null = null;
+		let maximum: Vector3 | null = null;
+
+		getChildMeshes.call(node, false).forEach((mesh) => {
+			if (mesh.getTotalVertices() <= 0) {
+				return;
+			}
+
+			mesh.refreshBoundingInfo({
+				applyMorph: true,
+				applySkeleton: true,
+				updatePositionsArray: true,
+			});
+
+			const box = mesh.getBoundingInfo().boundingBox;
+			minimum = minimum ? Vector3.Minimize(minimum, box.minimumWorld) : box.minimumWorld.clone();
+			maximum = maximum ? Vector3.Maximize(maximum, box.maximumWorld) : box.maximumWorld.clone();
+		});
+
+		return minimum && maximum
+			? {
+					minimum,
+					maximum,
+					center: Vector3.Center(minimum, maximum),
+				}
+			: null;
 	}
 
 	/**
@@ -1438,6 +1497,8 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			this.props.editor.layout.graph.setSelectedNode(sidecarRoot);
 			this.props.editor.layout.inspector.setEditedObject(sidecarRoot);
 			this.props.editor.layout.graph.refresh();
+			await waitNextAnimationFrame();
+			this.focusObject(sidecarRoot);
 		}
 	}
 }

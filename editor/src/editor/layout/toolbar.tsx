@@ -85,7 +85,7 @@ export class EditorToolbar extends Component<IEditorToolbarProps> {
 		return (
 			<ToolbarComponent>
 				<Menubar className="border-none rounded-none pl-3 my-auto">
-					<img alt="" src="assets/babylonjs_icon.png" className="w-6 object-contain" />
+					<img alt="" src="assets/ZENDING_while.png" className="w-6 object-contain" />
 
 					{/* File */}
 					<MenubarMenu>

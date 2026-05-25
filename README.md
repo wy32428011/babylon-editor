@@ -65,6 +65,8 @@ assets/car/
 
 动画驱动脚本通过 `onMqttValue` 接收外部实时值。当前版本只提供驱动入口，不内置 MQTT 连接、订阅和 broker 配置。后续接入 MQTT 客户端时，收到消息后调用 `dispatchMqttValueToObject` 即可把值分发给当前选中的动画驱动脚本。
 
+部分 CAD 或工业设备 GLB 会保留很大的原始世界坐标偏移，例如模型零件集中在距离原点数千单位的位置。编辑器在导入带外挂脚本的模型包时，会在不改写 `.glb` 文件的前提下，把本次导入的几何体居中到模型根节点附近，并在导入后自动聚焦该模型根节点，避免新项目画布只看到空根节点或灯光图标。
+
 ```ts
 import { IMqttDriverContext } from "babylonjs-editor-tools";
 
@@ -90,6 +92,47 @@ export default class DoorDriver {
 	}
 }
 ```
+
+### GLB 模型批量外挂脚本
+
+当前已提供 `scripts/generate-glb-sidecars.cjs`，用于整理 `E:\公司文件\数字孪生\模型文件\GLB` 下的 GLB 模型包。脚本会保留顶层原始 GLB，不移动、不删除文件，只把每个模型复制到同名文件夹，并在文件夹内生成同名参数脚本和动画驱动脚本。
+
+执行命令：
+
+```bash
+node scripts/generate-glb-sidecars.cjs
+```
+
+生成后的目录结构示例：
+
+```text
+E:\公司文件\数字孪生\模型文件\GLB\辊道机\
+  辊道机.glb
+  辊道机.params.ts
+  辊道机.anim.roller.ts
+  辊道机.anim.motor.ts
+```
+
+本批模型的默认脚本清单如下：
+
+- `多穿小车`：`move` 整体行走、`fork` 货叉伸缩、`load` 载货显隐。
+- `辊道机`：`roller` 辊筒旋转、`motor` 电机状态。
+- `链条机`：`chain` 链条循环、`motor` 电机状态。
+- `GD_有电机_Optimized(1)`：`roller` 输送辊旋转、`motor` 电机状态。
+- `HCTS`：`state` 设备状态高亮。
+- `LED`：`blink` 灯光闪烁、`status` 灯光状态。
+- `RGV`：`move` 轨道行走、`state` 整车状态。
+- `Shelf`：`state` 货架状态、`slot` 库位占用。
+- `Stacker`：`travel` 堆垛机行走、`lift` 载货台升降、`fork` 货叉伸缩。
+- `WLTS`：`roller` 辊筒旋转、`motor` 电机状态。
+- `YZJ`：`transfer` 移载动作、`roller` 辊筒旋转、`state` 整体状态。
+
+MQTT 值约定：
+
+- 位移、货叉、升降、移载脚本接收数字并按 `minValue` 到 `maxValue` 归一化到 0-1，再映射到 `distance`。
+- 辊筒、链条、电机脚本接收数字并按归一化比例换算为持续速度，`0` 表示停止，正数表示运行。
+- 状态脚本支持数字、布尔、字符串和对象。`0/false/stopped` 表示停止，`1/true/running` 表示运行，`2/fault/alarm/故障/报警` 表示故障，`3/selected/选中` 表示选中。
+- 对象 payload 可使用 `{ value }`、`{ state }`、`{ status }`、`{ position }`、`{ speed }` 或 `{ ratio }` 字段，脚本会自动读取第一个可用字段。
 
 ## 下载
 
@@ -141,6 +184,14 @@ sudo apt install -y make python build-essential
 yarn install
 ```
 
+如果 Windows 下运行 `yarn build` 报 `'tsc' 不是内部或外部命令`，通常是 `node_modules` 中依赖包存在，但 `node_modules/.bin` 命令垫片缺失。可在仓库根目录执行：
+
+```bash
+yarn install --ignore-scripts --non-interactive
+```
+
+该命令会重新链接 workspace 依赖和 `.bin` 命令，不会执行 Electron 原生依赖重建脚本。执行后如果 `editor/node_modules` 或 `templates/*/node_modules` 下残留旧版 `babylonjs-editor-tools`、`babylonjs-editor-cli`，需要删除这些嵌套旧包，让模块解析回到根 workspace。
+
 ### 依赖解析说明
 
 `electron-builder` 会通过 `app-builder-lib` 间接拉取 `@electron/rebuild`。根 `resolutions` 将 `@electron/node-gyp` 固定到 npm 发布的 `10.2.0-electron.1`，避免使用 `@electron/rebuild@3.7.x` 声明的 GitHub URL。
@@ -171,6 +222,28 @@ yarn start
 ```
 
 开发者工具会自动打开。
+
+### Electron 模板项目
+
+编辑器创建的 Electron 项目在 Windows 下可以直接运行：
+
+```bash
+npm run dev
+```
+
+Electron 模板的开发脚本使用 `cross-env DEV=1` 设置开发环境变量，避免 Windows CMD 把 Unix 风格的 `DEV=1` 识别成命令而导致项目打开失败。已生成的旧项目如果仍然报 `'DEV' 不是内部或外部命令`，需要把项目 `package.json` 中的 `dev` 脚本同步为 `cross-env DEV=1 ...`，并安装 `cross-env`。
+
+从源码开发态启动编辑器时，新建项目会优先把 `babylonjs-editor-tools` 和 `babylonjs-editor-cli` 指向当前仓库的本地 `tools`、`cli` 工作区，确保本地新增的模型外挂脚本和 MQTT 驱动导出可以立即用于新项目。正式打包发布时仍使用模板原有的 npm 依赖声明。
+
+### 场景加载黑屏排查
+
+编辑器打开项目时会在加载主场景期间临时暂停预览渲染，避免半加载状态闪烁。当前加载流程已增加兜底恢复：即使某个 mesh、场景链接、环境贴图或材质编译抛出异常，也会重新打开预览渲染并关闭加载进度弹窗，避免画布永久保持黑屏。
+
+如果打开项目后仍然看不到模型，优先查看编辑器底部“控制台”和开发者工具 Console。场景加载失败会输出 `Failed to load scene "..."`，后面会带上具体资源或配置错误；如果控制台显示 `Scene loaded and editor is ready.`，则说明场景已加载，问题更可能是相机位置、模型坐标偏移或资源本身不可见。
+
+### node-pty 主进程异常排查
+
+打开项目时编辑器会用内置终端检查 Node.js 和安装项目依赖。Windows 下短命令可能在终端尺寸同步前已经退出，`node-pty` 会抛出 `Cannot resize a pty that has already exited`。主进程已经对 `write`、`resize`、`kill` 和窗口关闭清理做了兜底捕获，这类 pty 生命周期竞态只会被忽略并清理缓存，不应再弹出 “A JavaScript error occurred in the main process”。
 
 ## 开发
 

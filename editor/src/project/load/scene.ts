@@ -122,71 +122,77 @@ export async function loadScene(editor: Editor, projectPath: string, scenePath: 
 
 	options ??= {};
 
-	editor.layout.preview.setRenderScene(false);
+	const shouldControlPreviewRendering = !options.asLink;
+	let progress: LoadSceneProgressComponent | null = null;
+
+	if (shouldControlPreviewRendering) {
+		editor.layout.preview.setRenderScene(false);
+	}
+
 	editor.layout.console.log(`Loading scene "${relativeScenePath}"`);
 
-	// Prepare directories
-	await Promise.all([
-		createDirectoryIfNotExist(join(scenePath, "nodes")),
-		createDirectoryIfNotExist(join(scenePath, "meshes")),
-		createDirectoryIfNotExist(join(scenePath, "lods")),
-		createDirectoryIfNotExist(join(scenePath, "lights")),
-		createDirectoryIfNotExist(join(scenePath, "cameras")),
-		createDirectoryIfNotExist(join(scenePath, "geometries")),
-		createDirectoryIfNotExist(join(scenePath, "skeletons")),
-		createDirectoryIfNotExist(join(scenePath, "shadowGenerators")),
-		createDirectoryIfNotExist(join(scenePath, "sceneLinks")),
-		createDirectoryIfNotExist(join(scenePath, "gui")),
-		createDirectoryIfNotExist(join(scenePath, "soundNodes")),
-		createDirectoryIfNotExist(join(scenePath, "particleSystems")),
-		createDirectoryIfNotExist(join(scenePath, "morphTargetManagers")),
-		createDirectoryIfNotExist(join(scenePath, "morphTargets")),
-		createDirectoryIfNotExist(join(scenePath, "animationGroups")),
-		createDirectoryIfNotExist(join(scenePath, "sprite-maps")),
-		createDirectoryIfNotExist(join(scenePath, "sprite-managers")),
-		createDirectoryIfNotExist(join(scenePath, "nodeParticleSystemSets")),
-	]);
+	try {
+		// Prepare directories
+		await Promise.all([
+			createDirectoryIfNotExist(join(scenePath, "nodes")),
+			createDirectoryIfNotExist(join(scenePath, "meshes")),
+			createDirectoryIfNotExist(join(scenePath, "lods")),
+			createDirectoryIfNotExist(join(scenePath, "lights")),
+			createDirectoryIfNotExist(join(scenePath, "cameras")),
+			createDirectoryIfNotExist(join(scenePath, "geometries")),
+			createDirectoryIfNotExist(join(scenePath, "skeletons")),
+			createDirectoryIfNotExist(join(scenePath, "shadowGenerators")),
+			createDirectoryIfNotExist(join(scenePath, "sceneLinks")),
+			createDirectoryIfNotExist(join(scenePath, "gui")),
+			createDirectoryIfNotExist(join(scenePath, "soundNodes")),
+			createDirectoryIfNotExist(join(scenePath, "particleSystems")),
+			createDirectoryIfNotExist(join(scenePath, "morphTargetManagers")),
+			createDirectoryIfNotExist(join(scenePath, "morphTargets")),
+			createDirectoryIfNotExist(join(scenePath, "animationGroups")),
+			createDirectoryIfNotExist(join(scenePath, "sprite-maps")),
+			createDirectoryIfNotExist(join(scenePath, "sprite-managers")),
+			createDirectoryIfNotExist(join(scenePath, "nodeParticleSystemSets")),
+		]);
 
-	const [
-		nodesFiles,
-		meshesFiles,
-		lodsFiles,
-		lightsFiles,
-		cameraFiles,
-		skeletonFiles,
-		shadowGeneratorFiles,
-		sceneLinkFiles,
-		guiFiles,
-		soundNodeFiles,
-		particleSystemFiles,
-		morphTargetManagerFiles,
-		animationGroupFiles,
-		spriteMapFiles,
-		spriteManagerFiles,
-		nodeParticleSystemSetFiles,
-	] = await Promise.all([
-		readdir(join(scenePath, "nodes")),
-		readdir(join(scenePath, "meshes")),
-		readdir(join(scenePath, "lods")),
-		readdir(join(scenePath, "lights")),
-		readdir(join(scenePath, "cameras")),
-		readdir(join(scenePath, "skeletons")),
-		readdir(join(scenePath, "shadowGenerators")),
-		readdir(join(scenePath, "sceneLinks")),
-		readdir(join(scenePath, "gui")),
-		readdir(join(scenePath, "soundNodes")),
-		readdir(join(scenePath, "particleSystems")),
-		readdir(join(scenePath, "morphTargetManagers")),
-		readdir(join(scenePath, "animationGroups")),
-		readdir(join(scenePath, "sprite-maps")),
-		readdir(join(scenePath, "sprite-managers")),
-		readdir(join(scenePath, "nodeParticleSystemSets")),
-	]);
+		const [
+			nodesFiles,
+			meshesFiles,
+			lodsFiles,
+			lightsFiles,
+			cameraFiles,
+			skeletonFiles,
+			shadowGeneratorFiles,
+			sceneLinkFiles,
+			guiFiles,
+			soundNodeFiles,
+			particleSystemFiles,
+			morphTargetManagerFiles,
+			animationGroupFiles,
+			spriteMapFiles,
+			spriteManagerFiles,
+			nodeParticleSystemSetFiles,
+		] = await Promise.all([
+			readdir(join(scenePath, "nodes")),
+			readdir(join(scenePath, "meshes")),
+			readdir(join(scenePath, "lods")),
+			readdir(join(scenePath, "lights")),
+			readdir(join(scenePath, "cameras")),
+			readdir(join(scenePath, "skeletons")),
+			readdir(join(scenePath, "shadowGenerators")),
+			readdir(join(scenePath, "sceneLinks")),
+			readdir(join(scenePath, "gui")),
+			readdir(join(scenePath, "soundNodes")),
+			readdir(join(scenePath, "particleSystems")),
+			readdir(join(scenePath, "morphTargetManagers")),
+			readdir(join(scenePath, "animationGroups")),
+			readdir(join(scenePath, "sprite-maps")),
+			readdir(join(scenePath, "sprite-managers")),
+			readdir(join(scenePath, "nodeParticleSystemSets")),
+		]);
 
-	const progress = await showLoadSceneProgressDialog(`Loading ${basename(scenePath)}...`);
-	const progressStep =
-		100 /
-		(nodesFiles.length +
+		progress = await showLoadSceneProgressDialog(`Loading ${basename(scenePath)}...`);
+		const progressItemsCount =
+			nodesFiles.length +
 			meshesFiles.length +
 			lodsFiles.length +
 			lightsFiles.length +
@@ -201,312 +207,330 @@ export async function loadScene(editor: Editor, projectPath: string, scenePath: 
 			animationGroupFiles.length +
 			spriteMapFiles.length +
 			spriteManagerFiles.length +
-			nodeParticleSystemSetFiles.length);
+			nodeParticleSystemSetFiles.length;
+		const progressStep = progressItemsCount > 0 ? 100 / progressItemsCount : 100;
 
-	SceneLoaderFlags.ForceFullSceneLoadingForIncremental = true;
+		SceneLoaderFlags.ForceFullSceneLoadingForIncremental = true;
 
-	const assetsCache = loadSavedAssetsCache();
-	const config = await readJSON(join(scenePath, "config.json"), "utf-8");
+		const assetsCache = loadSavedAssetsCache();
+		const config = await readJSON(join(scenePath, "config.json"), "utf-8");
 
-	if (!options?.asLink) {
-		// Metadata
-		scene.metadata = config.metadata;
+		if (!options?.asLink) {
+			// Metadata
+			scene.metadata = config.metadata;
 
-		// Load camera
-		const camera = Camera.Parse(config.editorCamera, scene) as EditorCamera | null;
+			// Load camera
+			const camera = Camera.Parse(config.editorCamera, scene) as EditorCamera | null;
 
-		if (camera) {
-			editor.layout.preview.camera.dispose();
-			editor.layout.preview.camera = camera;
+			if (camera) {
+				editor.layout.preview.camera.dispose();
+				editor.layout.preview.camera = camera;
 
-			_GetAudioEngine(null).listener.attach(camera);
+				_GetAudioEngine(null).listener.attach(camera);
 
-			camera.attachControl(true);
-			camera.configureFromPreferences();
-		}
-
-		// Load environment
-		scene.iblIntensity = config.environment.iblIntensity ?? 1;
-		scene.environmentIntensity = config.environment.environmentIntensity;
-
-		const environmentTexture = config.environment.environmentTexture;
-		if (environmentTexture) {
-			if (environmentTexture.name && assetsCache[environmentTexture.name]) {
-				environmentTexture.name = assetsCache[environmentTexture.name].newRelativePath;
+				camera.attachControl(true);
+				camera.configureFromPreferences();
 			}
 
-			if (environmentTexture.url && assetsCache[environmentTexture.url]) {
-				environmentTexture.url = assetsCache[environmentTexture.url].newRelativePath;
+			// Load environment
+			const environment = config.environment ?? {};
+			scene.iblIntensity = environment.iblIntensity ?? 1;
+			scene.environmentIntensity = environment.environmentIntensity ?? scene.environmentIntensity;
+
+			const environmentTexture = environment.environmentTexture;
+			if (environmentTexture) {
+				if (environmentTexture.name && assetsCache[environmentTexture.name]) {
+					environmentTexture.name = assetsCache[environmentTexture.name].newRelativePath;
+				}
+
+				if (environmentTexture.url && assetsCache[environmentTexture.url]) {
+					environmentTexture.url = assetsCache[environmentTexture.url].newRelativePath;
+				}
+
+				scene.environmentTexture = Texture.Parse(environmentTexture, scene, join(projectPath, "/"));
+
+				if (isCubeTexture(scene.environmentTexture) || isHDRCubeTexture(scene.environmentTexture)) {
+					scene.environmentTexture.url = join(projectPath, scene.environmentTexture.name);
+				}
 			}
 
-			scene.environmentTexture = Texture.Parse(environmentTexture, scene, join(projectPath, "/"));
+			// Load fog
+			const fog = config.fog ?? {};
+			scene.fogEnabled = fog.fogEnabled ?? false;
+			scene.fogMode = fog.fogMode ?? scene.fogMode;
+			scene.fogStart = fog.fogStart ?? scene.fogStart;
+			scene.fogEnd = fog.fogEnd ?? scene.fogEnd;
+			scene.fogDensity = fog.fogDensity ?? scene.fogDensity;
+			scene.fogColor = fog.fogColor ? Color3.FromArray(fog.fogColor) : scene.fogColor;
 
-			if (isCubeTexture(scene.environmentTexture) || isHDRCubeTexture(scene.environmentTexture)) {
-				scene.environmentTexture.url = join(projectPath, scene.environmentTexture.name);
-			}
-		}
-
-		// Load fog
-		scene.fogEnabled = config.fog.fogEnabled;
-		scene.fogMode = config.fog.fogMode;
-		scene.fogStart = config.fog.fogStart;
-		scene.fogEnd = config.fog.fogEnd;
-		scene.fogDensity = config.fog.fogDensity;
-		scene.fogColor = Color3.FromArray(config.fog.fogColor);
-
-		// Colors
-		if (config.clearColor) {
-			scene.clearColor = Color4.FromArray(config.clearColor);
-		}
-
-		if (config.ambientColor) {
-			scene.ambientColor = Color3.FromArray(config.ambientColor);
-		}
-
-		// Physics
-		if (config.physics) {
-			scene.getPhysicsEngine()?.setGravity(Vector3.FromArray(config.physics.gravity));
-		}
-	}
-
-	if (config.newScene) {
-		createNewSceneDefaultNodes(editor, loadResult);
-		delete config.newScene;
-	}
-
-	const pluginLoadOptions: ISceneLoaderPluginOptions = {
-		projectPath,
-		scenePath,
-		relativeScenePath,
-		loadResult,
-		progress,
-		progressStep,
-		assetsCache,
-		asLink: options.asLink,
-	};
-
-	await loadTransformNodes(editor, nodesFiles, scene, pluginLoadOptions);
-	await loadSkeletons(editor, skeletonFiles, scene, pluginLoadOptions);
-	await loadMeshes(meshesFiles, scene, pluginLoadOptions);
-	await loadMorphTargetManagers(editor, morphTargetManagerFiles, scene, pluginLoadOptions);
-	await loadLights(editor, lightsFiles, scene, pluginLoadOptions);
-	await loadCameras(editor, cameraFiles, scene, pluginLoadOptions);
-
-	if (!options?.asLink) {
-		await loadShadowGenerators(editor, shadowGeneratorFiles, scene, pluginLoadOptions);
-	}
-
-	await loadGuis(editor, guiFiles, pluginLoadOptions);
-	await loadSoundNodes(editor, soundNodeFiles, scene, pluginLoadOptions);
-	await loadParticleSystems(editor, particleSystemFiles, scene, pluginLoadOptions);
-	await loadAnimationGroups(editor, animationGroupFiles, scene, pluginLoadOptions);
-	await loadSpriteMaps(editor, spriteMapFiles, scene, pluginLoadOptions);
-	await loadSpriteManagers(editor, spriteManagerFiles, scene, pluginLoadOptions);
-	await loadNodeParticleSystemSets(editor, nodeParticleSystemSetFiles, scene, pluginLoadOptions);
-
-	// Configure textures urls
-	scene.textures.forEach((texture) => {
-		if (isTexture(texture) || isCubeTexture(texture) || isHDRCubeTexture(texture)) {
-			texture.url = texture.name;
-		}
-	});
-
-	// Configure lights
-	scene.lights.forEach((light) => {
-		updatePointLightShadowMapRenderListPredicate(light);
-	});
-
-	// Configure LODs
-	scene.meshes.forEach((mesh) => {
-		if (!mesh._waitingData.lods || !isMesh(mesh)) {
-			return;
-		}
-
-		const masterMesh = scene.getMeshById(mesh._waitingData.lods.masterMeshId);
-		if (masterMesh && isMesh(masterMesh)) {
-			mesh.material = masterMesh.material;
-			masterMesh.addLODLevel(mesh._waitingData.lods.distanceOrScreenCoverage, mesh);
-		}
-
-		mesh._waitingData.lods = null;
-	});
-
-	// Scene animations
-	scene.animations ??= [];
-	config.animations?.forEach((data: any) => {
-		scene.animations.push(Animation.Parse(data));
-	});
-
-	// Scene animation groups
-	// TODO: legacy
-	config.animationGroups?.forEach((data: any) => {
-		const group = AnimationGroup.Parse(data, scene);
-		if (group.targetedAnimations.length === 0) {
-			group.dispose();
-		} else {
-			loadResult.animationGroups.push(group);
-		}
-	});
-
-	// Load scene links
-	loadedScenes.push(relativeScenePath);
-
-	for (const file of sceneLinkFiles) {
-		try {
-			const data = await readJSON(join(scenePath, "sceneLinks", file), "utf-8");
-
-			if (options?.asLink && data.metadata?.doNotSerialize) {
-				continue;
+			// Colors
+			if (config.clearColor) {
+				scene.clearColor = Color4.FromArray(config.clearColor);
 			}
 
-			if (loadedScenes.includes(data._relativePath)) {
-				editor.layout.console.error(`Can't load scene "${data._relativePath}": cycle references detected.`);
-				continue;
+			if (config.ambientColor) {
+				scene.ambientColor = Color3.FromArray(config.ambientColor);
 			}
 
-			const sceneLink = await createSceneLink(editor, join(projectPath, data._relativePath));
-			if (sceneLink) {
-				sceneLink.parse(data);
-
-				sceneLink.uniqueId = data.uniqueId;
-				sceneLink.metadata ??= {};
-				sceneLink.metadata._waitingParentId = data.parentId;
-
-				loadResult.sceneLinks.push(sceneLink);
-			}
-		} catch (e) {
-			if (e instanceof Error) {
-				editor.layout.console.error(`Failed to load scene link file "${file}": ${e.message}`);
+			// Physics
+			if (config.physics) {
+				scene.getPhysicsEngine()?.setGravity(Vector3.FromArray(config.physics.gravity));
 			}
 		}
 
-		progress.step(progressStep);
-	}
-
-	loadedScenes.pop();
-
-	// Configure waiting parent ids.
-	const allNodes = [...scene.transformNodes, ...scene.meshes, ...scene.lights, ...scene.cameras, ...editor.layout.preview.clusteredLightContainer.lights];
-
-	allNodes.forEach((n) => {
-		if ((n.metadata?._waitingParentId ?? null) === null) {
-			return;
+		if (config.newScene) {
+			createNewSceneDefaultNodes(editor, loadResult);
+			delete config.newScene;
 		}
 
-		const transformNode = scene.getTransformNodeByUniqueId(n.metadata._waitingParentId as any);
-		if (transformNode) {
-			return (n.parent = transformNode);
+		const pluginLoadOptions: ISceneLoaderPluginOptions = {
+			projectPath,
+			scenePath,
+			relativeScenePath,
+			loadResult,
+			progress,
+			progressStep,
+			assetsCache,
+			asLink: options.asLink,
+		};
+
+		await loadTransformNodes(editor, nodesFiles, scene, pluginLoadOptions);
+		await loadSkeletons(editor, skeletonFiles, scene, pluginLoadOptions);
+		await loadMeshes(meshesFiles, scene, pluginLoadOptions);
+		await loadMorphTargetManagers(editor, morphTargetManagerFiles, scene, pluginLoadOptions);
+		await loadLights(editor, lightsFiles, scene, pluginLoadOptions);
+		await loadCameras(editor, cameraFiles, scene, pluginLoadOptions);
+
+		if (!options?.asLink) {
+			await loadShadowGenerators(editor, shadowGeneratorFiles, scene, pluginLoadOptions);
 		}
 
-		const mesh = scene.getMeshByUniqueId(n.metadata._waitingParentId as any);
-		if (mesh) {
-			return (n.parent = mesh);
-		}
+		await loadGuis(editor, guiFiles, pluginLoadOptions);
+		await loadSoundNodes(editor, soundNodeFiles, scene, pluginLoadOptions);
+		await loadParticleSystems(editor, particleSystemFiles, scene, pluginLoadOptions);
+		await loadAnimationGroups(editor, animationGroupFiles, scene, pluginLoadOptions);
+		await loadSpriteMaps(editor, spriteMapFiles, scene, pluginLoadOptions);
+		await loadSpriteManagers(editor, spriteManagerFiles, scene, pluginLoadOptions);
+		await loadNodeParticleSystemSets(editor, nodeParticleSystemSetFiles, scene, pluginLoadOptions);
 
-		const light = scene.getLightByUniqueId(n.metadata._waitingParentId as any);
-		if (light) {
-			return (n.parent = light);
-		}
-
-		const camera = scene.getCameraByUniqueId(n.metadata._waitingParentId as any);
-		if (camera) {
-			return (n.parent = camera);
-		}
-	});
-
-	// Configure clustered lights
-	if (config.clusteredLight) {
-		config.clusteredLight.lights.forEach((lightId: any) => {
-			const light = scene.getLightById(lightId);
-			if (light) {
-				editor.layout.preview.clusteredLightContainer.addLight(light);
+		// Configure textures urls
+		scene.textures.forEach((texture) => {
+			if (isTexture(texture) || isCubeTexture(texture) || isHDRCubeTexture(texture)) {
+				texture.url = texture.name;
 			}
 		});
 
-		editor.layout.preview.clusteredLightContainer.horizontalTiles = config.clusteredLight.horizontalTiles;
-		editor.layout.preview.clusteredLightContainer.verticalTiles = config.clusteredLight.verticalTiles;
-		editor.layout.preview.clusteredLightContainer.depthSlices = config.clusteredLight.depthSlices;
-		editor.layout.preview.clusteredLightContainer.maxRange = config.clusteredLight.maxRange;
-	}
-
-	if (!options?.asLink) {
-		allNodes.forEach((n) => {
-			if (n.metadata) {
-				delete n.metadata._waitingParentId;
-			}
-
-			if (isAbstractMesh(n)) {
-				n.refreshBoundingInfo(true, true);
-			}
+		// Configure lights
+		scene.lights.forEach((light) => {
+			updatePointLightShadowMapRenderListPredicate(light);
 		});
 
-		// For each camera
-		const postProcessConfigurations = Array.isArray(config.rendering) ? config.rendering : [];
-
-		postProcessConfigurations.forEach((configuration: any) => {
-			const camera = scene.getCameraById(configuration.cameraId);
-			if (!camera) {
+		// Configure LODs
+		scene.meshes.forEach((mesh) => {
+			if (!mesh._waitingData.lods || !isMesh(mesh)) {
 				return;
 			}
 
-			ssaoRenderingPipelineCameraConfigurations.set(camera, configuration.ssao2RenderingPipeline);
-			vlsPostProcessCameraConfigurations.set(camera, configuration.vlsPostProcess);
-			ssrRenderingPipelineCameraConfigurations.set(camera, configuration.ssrRenderingPipeline);
-			motionBlurPostProcessCameraConfigurations.set(camera, configuration.motionBlurPostProcess);
-			defaultPipelineCameraConfigurations.set(camera, configuration.defaultRenderingPipeline);
-			taaPipelineCameraConfigurations.set(camera, configuration.taaRenderingPipeline);
-			iblShadowsRenderingPipelineCameraConfigurations.set(camera, configuration.iblShadowsRenderPipeline);
+			const masterMesh = scene.getMeshById(mesh._waitingData.lods.masterMeshId);
+			if (masterMesh && isMesh(masterMesh)) {
+				mesh.material = masterMesh.material;
+				masterMesh.addLODLevel(mesh._waitingData.lods.distanceOrScreenCoverage, mesh);
+			}
 
-			if (isEditorCamera(camera)) {
-				if (configuration.iblShadowsRenderPipeline) {
-					parseIblShadowsRenderingPipeline(editor, configuration.iblShadowsRenderPipeline);
-				}
+			mesh._waitingData.lods = null;
+		});
 
-				if (configuration.ssao2RenderingPipeline) {
-					parseSSAO2RenderingPipeline(editor, configuration.ssao2RenderingPipeline);
-				}
+		// Scene animations
+		scene.animations ??= [];
+		config.animations?.forEach((data: any) => {
+			scene.animations.push(Animation.Parse(data));
+		});
 
-				if (configuration.vlsPostProcess) {
-					parseVLSPostProcess(editor, configuration.vlsPostProcess);
-				}
-
-				if (configuration.ssrRenderingPipeline) {
-					parseSSRRenderingPipeline(editor, configuration.ssrRenderingPipeline);
-				}
-
-				if (configuration.motionBlurPostProcess) {
-					parseMotionBlurPostProcess(editor, configuration.motionBlurPostProcess);
-				}
-
-				if (configuration.defaultRenderingPipeline) {
-					parseDefaultRenderingPipeline(editor, configuration.defaultRenderingPipeline);
-				}
-
-				if (configuration.taaRenderingPipeline) {
-					parseTAARenderingPipeline(editor, configuration.taaRenderingPipeline);
-				}
+		// Scene animation groups
+		// TODO: legacy
+		config.animationGroups?.forEach((data: any) => {
+			const group = AnimationGroup.Parse(data, scene);
+			if (group.targetedAnimations.length === 0) {
+				group.dispose();
+			} else {
+				loadResult.animationGroups.push(group);
 			}
 		});
-	}
 
-	setTimeout(() => {
-		updateAllLights(scene);
-		updateIblShadowsRenderPipeline(scene, true);
+		// Load scene links
+		loadedScenes.push(relativeScenePath);
+		try {
+			for (const file of sceneLinkFiles) {
+				try {
+					const data = await readJSON(join(scenePath, "sceneLinks", file), "utf-8");
 
-		if (!options.asLink) {
-			checkProjectCachedCompressedTextures(editor);
+					if (options?.asLink && data.metadata?.doNotSerialize) {
+						continue;
+					}
+
+					if (loadedScenes.includes(data._relativePath)) {
+						editor.layout.console.error(`Can't load scene "${data._relativePath}": cycle references detected.`);
+						continue;
+					}
+
+					const sceneLink = await createSceneLink(editor, join(projectPath, data._relativePath));
+					if (sceneLink) {
+						sceneLink.parse(data);
+
+						sceneLink.uniqueId = data.uniqueId;
+						sceneLink.metadata ??= {};
+						sceneLink.metadata._waitingParentId = data.parentId;
+
+						loadResult.sceneLinks.push(sceneLink);
+					}
+				} catch (e) {
+					if (e instanceof Error) {
+						editor.layout.console.error(`Failed to load scene link file "${file}": ${e.message}`);
+					}
+				}
+
+				progress.step(progressStep);
+			}
+		} finally {
+			loadedScenes.pop();
+		}
+
+		// Configure waiting parent ids.
+		const allNodes = [...scene.transformNodes, ...scene.meshes, ...scene.lights, ...scene.cameras, ...editor.layout.preview.clusteredLightContainer.lights];
+
+		allNodes.forEach((n) => {
+			if ((n.metadata?._waitingParentId ?? null) === null) {
+				return;
+			}
+
+			const transformNode = scene.getTransformNodeByUniqueId(n.metadata._waitingParentId as any);
+			if (transformNode) {
+				return (n.parent = transformNode);
+			}
+
+			const mesh = scene.getMeshByUniqueId(n.metadata._waitingParentId as any);
+			if (mesh) {
+				return (n.parent = mesh);
+			}
+
+			const light = scene.getLightByUniqueId(n.metadata._waitingParentId as any);
+			if (light) {
+				return (n.parent = light);
+			}
+
+			const camera = scene.getCameraByUniqueId(n.metadata._waitingParentId as any);
+			if (camera) {
+				return (n.parent = camera);
+			}
+		});
+
+		// Configure clustered lights
+		if (config.clusteredLight) {
+			config.clusteredLight.lights.forEach((lightId: any) => {
+				const light = scene.getLightById(lightId);
+				if (light) {
+					editor.layout.preview.clusteredLightContainer.addLight(light);
+				}
+			});
+
+			editor.layout.preview.clusteredLightContainer.horizontalTiles = config.clusteredLight.horizontalTiles;
+			editor.layout.preview.clusteredLightContainer.verticalTiles = config.clusteredLight.verticalTiles;
+			editor.layout.preview.clusteredLightContainer.depthSlices = config.clusteredLight.depthSlices;
+			editor.layout.preview.clusteredLightContainer.maxRange = config.clusteredLight.maxRange;
+		}
+
+		if (!options?.asLink) {
+			allNodes.forEach((n) => {
+				if (n.metadata) {
+					delete n.metadata._waitingParentId;
+				}
+
+				if (isAbstractMesh(n)) {
+					n.refreshBoundingInfo(true, true);
+				}
+			});
+
+			// For each camera
+			const postProcessConfigurations = Array.isArray(config.rendering) ? config.rendering : [];
+
+			postProcessConfigurations.forEach((configuration: any) => {
+				const camera = scene.getCameraById(configuration.cameraId);
+				if (!camera) {
+					return;
+				}
+
+				ssaoRenderingPipelineCameraConfigurations.set(camera, configuration.ssao2RenderingPipeline);
+				vlsPostProcessCameraConfigurations.set(camera, configuration.vlsPostProcess);
+				ssrRenderingPipelineCameraConfigurations.set(camera, configuration.ssrRenderingPipeline);
+				motionBlurPostProcessCameraConfigurations.set(camera, configuration.motionBlurPostProcess);
+				defaultPipelineCameraConfigurations.set(camera, configuration.defaultRenderingPipeline);
+				taaPipelineCameraConfigurations.set(camera, configuration.taaRenderingPipeline);
+				iblShadowsRenderingPipelineCameraConfigurations.set(camera, configuration.iblShadowsRenderPipeline);
+
+				if (isEditorCamera(camera)) {
+					if (configuration.iblShadowsRenderPipeline) {
+						parseIblShadowsRenderingPipeline(editor, configuration.iblShadowsRenderPipeline);
+					}
+
+					if (configuration.ssao2RenderingPipeline) {
+						parseSSAO2RenderingPipeline(editor, configuration.ssao2RenderingPipeline);
+					}
+
+					if (configuration.vlsPostProcess) {
+						parseVLSPostProcess(editor, configuration.vlsPostProcess);
+					}
+
+					if (configuration.ssrRenderingPipeline) {
+						parseSSRRenderingPipeline(editor, configuration.ssrRenderingPipeline);
+					}
+
+					if (configuration.motionBlurPostProcess) {
+						parseMotionBlurPostProcess(editor, configuration.motionBlurPostProcess);
+					}
+
+					if (configuration.defaultRenderingPipeline) {
+						parseDefaultRenderingPipeline(editor, configuration.defaultRenderingPipeline);
+					}
+
+					if (configuration.taaRenderingPipeline) {
+						parseTAARenderingPipeline(editor, configuration.taaRenderingPipeline);
+					}
+				}
+			});
+		}
+
+		setTimeout(() => {
+			updateAllLights(scene);
+			updateIblShadowsRenderPipeline(scene, true);
+
+			if (!options.asLink) {
+				checkProjectCachedCompressedTextures(editor);
+				editor.layout.preview.setRenderScene(true);
+			}
+		}, 150);
+
+		if (!options?.asLink) {
+			progress.setName("Compiling materials...");
+			await forceCompileAllSceneMaterials(scene);
+		}
+
+		progress.dispose();
+		progress = null;
+
+		editor.layout.console.log("Scene loaded and editor is ready.");
+
+		return loadResult;
+	} catch (e) {
+		const message = e instanceof Error ? e.message : String(e);
+		editor.layout.console.error(`Failed to load scene "${relativeScenePath}": ${message}`);
+		console.error(e);
+		throw e;
+	} finally {
+		// 场景加载失败时也必须恢复预览渲染，否则画布会一直保持黑屏。
+		if (shouldControlPreviewRendering) {
 			editor.layout.preview.setRenderScene(true);
 		}
-	}, 150);
 
-	if (!options?.asLink) {
-		progress.setName("Compiling materials...");
-		await forceCompileAllSceneMaterials(scene);
+		progress?.dispose();
 	}
-
-	progress.dispose();
-
-	editor.layout.console.log("Scene loaded and editor is ready.");
-
-	return loadResult;
 }

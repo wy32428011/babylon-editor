@@ -1,6 +1,6 @@
-import { join } from "path/posix";
+import { dirname, join, relative } from "path/posix";
 import { ipcRenderer } from "electron";
-import { readJSON, remove, writeJSON } from "fs-extra";
+import { pathExists, readJSON, remove, writeJSON } from "fs-extra";
 
 import decompress from "decompress";
 import decompressTargz from "decompress-targz";
@@ -32,6 +32,78 @@ export interface IDashboardCreateProjectDialogProps {
 }
 
 type PackageManagerCheckState = "processing" | "available" | "not-available";
+
+/**
+ * 从当前工作目录向上查找本地源码工作区中的包目录。
+ * @param packageDirectory 定义要查找的工作区目录名称。
+ */
+async function findLocalWorkspacePackageDirectory(packageDirectory: "tools" | "cli") {
+	let current = process.cwd().replace(/\\/g, "/");
+
+	for (let i = 0; i < 8; i++) {
+		const candidate = join(current, packageDirectory);
+		if (await pathExists(join(candidate, "package.json"))) {
+			return candidate;
+		}
+
+		const parent = dirname(current);
+		if (parent === current || parent === ".") {
+			break;
+		}
+
+		current = parent;
+	}
+
+	return null;
+}
+
+/**
+ * 生成写入 package.json 的本地 file 依赖路径。
+ * @param destination 定义新项目所在目录。
+ * @param packageDirectory 定义本地源码包目录。
+ */
+function getLocalPackageDependency(destination: string, packageDirectory: string) {
+	const relativePackageDirectory = relative(destination.replace(/\\/g, "/"), packageDirectory).replace(/\\/g, "/");
+	const normalizedPackageDirectory = relativePackageDirectory.startsWith(".") ? relativePackageDirectory : `./${relativePackageDirectory}`;
+
+	return `file:${normalizedPackageDirectory}`;
+}
+
+/**
+ * 开发态创建项目时，优先让项目使用当前源码工作区中的 tools 和 cli。
+ * 这样本地新增的脚本运行时能力可以立即被新项目使用，不依赖 npm 上同版本包是否已发布。
+ * @param destination 定义新项目所在目录。
+ */
+async function setupLocalWorkspaceDependencies(destination: string) {
+	if (!process.env.DEBUG) {
+		return;
+	}
+
+	const toolsDirectory = await findLocalWorkspacePackageDirectory("tools");
+	const cliDirectory = await findLocalWorkspacePackageDirectory("cli");
+	if (!toolsDirectory && !cliDirectory) {
+		return;
+	}
+
+	const packageJsonPath = join(destination, "package.json");
+	const packageJson = await readJSON(packageJsonPath);
+
+	packageJson.dependencies ??= {};
+	packageJson.devDependencies ??= {};
+
+	if (toolsDirectory) {
+		packageJson.dependencies["babylonjs-editor-tools"] = getLocalPackageDependency(destination, toolsDirectory);
+	}
+
+	if (cliDirectory) {
+		packageJson.devDependencies["babylonjs-editor-cli"] = getLocalPackageDependency(destination, cliDirectory);
+	}
+
+	await writeJSON(packageJsonPath, packageJson, {
+		spaces: "\t",
+		encoding: "utf-8",
+	});
+}
 
 export function DashboardCreateProjectDialog(props: IDashboardCreateProjectDialogProps) {
 	const [destination, setDestination] = useState("");
@@ -87,6 +159,8 @@ export function DashboardCreateProjectDialog(props: IDashboardCreateProjectDialo
 			spaces: "\t",
 			encoding: "utf-8",
 		});
+
+		await setupLocalWorkspaceDependencies(destination);
 
 		// Generate public/scene.
 		await pack(destination, {

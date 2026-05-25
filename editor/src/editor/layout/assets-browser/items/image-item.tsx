@@ -86,7 +86,7 @@ export class AssetBrowserImageItem extends AssetsBrowserItem {
 	private async _updateThumbnail(): Promise<void> {
 		if (await pathExists(this.props.absolutePath)) {
 			const buffer = (await sharp(this.props.absolutePath).resize(256, 256).toBuffer()) as Buffer;
-			this._thumbnailPath = URL.createObjectURL(new Blob([buffer]));
+			this._thumbnailPath = URL.createObjectURL(new Blob([new Uint8Array(buffer)]));
 		} else {
 			this._thumbnailError = true;
 		}

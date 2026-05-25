@@ -586,7 +586,7 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 
 		this.setState({
 			previewError: false,
-			previewTemporaryUrl: URL.createObjectURL(new Blob([buffer])),
+			previewTemporaryUrl: URL.createObjectURL(new Blob([new Uint8Array(buffer)])),
 		});
 	}
 
@@ -608,7 +608,7 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 
 			this.setState({
 				previewError: false,
-				previewTemporaryUrl: URL.createObjectURL(new Blob([buffer])),
+				previewTemporaryUrl: URL.createObjectURL(new Blob([new Uint8Array(buffer)])),
 			});
 		}
 	}

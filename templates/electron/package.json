@@ -6,7 +6,7 @@
 	"private": true,
 	"main": "dist/main.mjs",
 	"scripts": {
-		"dev": "DEV=1 concurrently \"vite\" \"tsc-watch -p tsconfig-electron.json --onSuccess \\\"electron .\\\"\"",
+		"dev": "cross-env DEV=1 concurrently \"vite\" \"tsc-watch -p tsconfig-electron.json --onSuccess \\\"electron .\\\"\"",
 		"build": "vite build && tsc -p tsconfig-electron.json",
 		"generate": "babylonjs-editor-cli pack",
 		"start": "electron .",
@@ -25,6 +25,7 @@
 		"@types/node": "^22",
 		"babylonjs-editor-cli": "latest",
 		"concurrently": "9.2.0",
+		"cross-env": "7.0.3",
 		"electron": "39.8.5",
 		"electron-builder": "26.0.12",
 		"tailwindcss": "4.1.18",

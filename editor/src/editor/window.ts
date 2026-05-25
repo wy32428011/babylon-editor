@@ -4,13 +4,13 @@ import { app, BrowserWindow, dialog, ipcMain, nativeImage, screen } from "electr
 import { closeAllNodePtyForWebContentsId } from "../electron/node-pty";
 
 /**
- * Defines the list of all available editor windows that are opened.
+ * 定义当前已打开的编辑器窗口列表。
  */
 export const editorWindows: BrowserWindow[] = [];
 
 /**
- * Creates a new window that takes up the entire screen.
- * @returns The newly created window.
+ * 创建主编辑器窗口，并等待渲染进程和编辑器布局初始化完成后显示。
+ * @returns 新创建的编辑器窗口。
  */
 export async function createEditorWindow(): Promise<BrowserWindow> {
 	const primaryDisplay = screen.getPrimaryDisplay();
@@ -121,9 +121,9 @@ export async function createEditorWindow(): Promise<BrowserWindow> {
 }
 
 /**
- * Opens a new custom window that will require the given index.js file and will instantiate the content of it using the given options.
- * @param indexPath defines the path to the index.js file to require for the window (entry point). The path is relative to the app path.
- * @param options defines the optional options to pass to the window main component exported by default by the index.js required file.
+ * 创建自定义编辑器子窗口，并把入口脚本和启动参数发送给该窗口。
+ * @param indexPath 定义窗口入口脚本路径，路径相对应用根目录。
+ * @param options 定义传递给窗口主组件的启动参数。
  * @example ipcRenderer.send("window:open", "build/src/editor/windows/nme", { filePath: "my-material.material"  });
  */
 export async function createCustomWindow(indexPath: string, options: any): Promise<BrowserWindow> {
@@ -164,9 +164,8 @@ export async function createCustomWindow(indexPath: string, options: any): Promi
 }
 
 /**
- * Shows the close editor window dialog. This is used to get a confirmation from the user that the window
- * should be closed and is not due to a miss-click or bad keyboard shortcut.
- * @param window defines the reference to the window to show the dialog in.
+ * 显示关闭编辑器窗口确认框，避免误触导致当前项目窗口被关闭。
+ * @param window 定义需要显示确认框的父窗口。
  */
 export function showCloseEditorWindowsDialog(window: BrowserWindow): boolean {
 	const result = dialog.showMessageBoxSync(window, {
@@ -174,7 +173,7 @@ export function showCloseEditorWindowsDialog(window: BrowserWindow): boolean {
 		buttons: ["是", "否"],
 		title: "关闭窗口",
 		message: "确定要关闭窗口吗？",
-		icon: nativeImage.createFromPath(join(app.getAppPath(), "assets/babylonjs_icon.png")),
+		icon: nativeImage.createFromPath(join(app.getAppPath(), "assets/ZENDING_EN.png")),
 	});
 
 	return result === 0;

@@ -87,11 +87,11 @@ export class Dashboard extends Component<IDashboardProps, IDashboardState> {
 
 						<Fade delay={0}>
 							<div className="flex justify-between items-end w-full mt-1">
-								<div className="text-5xl font-semibold">仪表盘</div>
+								<div className="text-2xl font-semibold">中鼎智能-软件研发3D编辑器</div>
 
 								<div className="flex flex-col items-end gap-2">
-									<img alt="" src="assets/babylonjs_icon.png" className="w-[48px] object-contain" />
-									<div className="text-xs">Babylon.js Editor v{packageJson.version}</div>
+									<img alt="" src="assets/ZENDING_while.png" className="w-[180px] object-contain" />
+									<div className="text-xs">中鼎智能3D编辑器 v{packageJson.version}</div>
 								</div>
 							</div>
 						</Fade>

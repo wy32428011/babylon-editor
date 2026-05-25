@@ -1,7 +1,7 @@
 import { copy, ensureDir, pathExists, readdir } from "fs-extra";
 import { basename, dirname, extname, join } from "path/posix";
 
-import { ISceneLoaderAsyncResult, Node, Scene, Tools, TransformNode } from "babylonjs";
+import { AbstractMesh, ISceneLoaderAsyncResult, Node, Scene, Tools, TransformNode, Vector3 } from "babylonjs";
 
 import { findAvailableFilename } from "./fs";
 import { UniqueNumber } from "./tools";
@@ -18,6 +18,7 @@ export interface IModelSidecarMetadata {
 	paramsScriptKey: string | null;
 	animationScripts: IModelSidecarAnimationScript[];
 	selectedAnimationKey: string | null;
+	importOffset?: [number, number, number];
 }
 
 export interface IModelSidecarScriptRecord {
@@ -138,7 +139,7 @@ export async function discoverModelSidecar(projectPath: string, modelAbsolutePat
  * 配置导入模型的根节点，并把发现到的外挂脚本写入模型根节点 metadata。
  */
 export function applyModelSidecarToImport(scene: Scene, result: ISceneLoaderAsyncResult, sidecar: IDiscoveredModelSidecar): TransformNode {
-	const root = getOrCreateModelSidecarRoot(scene, result, sidecar.modelPath);
+	const { root, importOffset } = getOrCreateModelSidecarRoot(scene, result, sidecar.modelPath);
 	root.metadata ??= {};
 
 	const selectedAnimationKey = sidecar.animationScripts.length === 1 ? sidecar.animationScripts[0].key : null;
@@ -148,6 +149,7 @@ export function applyModelSidecarToImport(scene: Scene, result: ISceneLoaderAsyn
 		paramsScriptKey: sidecar.paramsScriptKey,
 		animationScripts: sidecar.animationScripts,
 		selectedAnimationKey,
+		...(importOffset ? { importOffset } : {}),
 	} satisfies IModelSidecarMetadata;
 
 	const regularScripts = ((root.metadata.scripts ?? []) as IModelSidecarScriptRecord[]).filter((script) => !isModelSidecarScript(script));
@@ -248,14 +250,14 @@ function findAnimationSidecarScripts(projectDir: string, modelDir: string, model
 /**
  * 获取导入模型的根节点；没有稳定根节点时创建一个新的 TransformNode。
  */
-function getOrCreateModelSidecarRoot(scene: Scene, result: ISceneLoaderAsyncResult, modelPath: string): TransformNode {
+function getOrCreateModelSidecarRoot(scene: Scene, result: ISceneLoaderAsyncResult, modelPath: string): { root: TransformNode; importOffset: [number, number, number] | null } {
 	const importNodes = [...result.meshes, ...result.transformNodes, ...result.lights] as Node[];
 	const importNodeSet = new Set<Node>(importNodes);
 	const topLevelTransformNodes = [...result.meshes, ...result.transformNodes].filter((node) => !node.parent || !importNodeSet.has(node.parent));
 	const existingRoot = topLevelTransformNodes.find((node) => node.name === basename(modelPath)) ?? (topLevelTransformNodes.length === 1 ? topLevelTransformNodes[0] : null);
 
 	if (existingRoot) {
-		return existingRoot;
+		return { root: existingRoot, importOffset: null };
 	}
 
 	const root = new TransformNode(`${basename(modelPath, extname(modelPath))}_root`, scene);
@@ -266,5 +268,47 @@ function getOrCreateModelSidecarRoot(scene: Scene, result: ISceneLoaderAsyncResu
 		node.parent = root;
 	});
 
-	return root;
+	const geometryCenter = getImportedMeshesBoundingCenter(result.meshes);
+	if (!geometryCenter) {
+		return { root, importOffset: null };
+	}
+
+	topLevelTransformNodes.forEach((node) => {
+		node.position.subtractInPlace(geometryCenter);
+	});
+
+	return { root, importOffset: vectorToTuple(geometryCenter.negate()) };
+}
+
+/**
+ * 计算本次导入网格的聚合包围盒中心，用于把 CAD 大坐标模型居中到 sidecar 根节点附近。
+ */
+function getImportedMeshesBoundingCenter(meshes: AbstractMesh[]): Vector3 | null {
+	let minimum: Vector3 | null = null;
+	let maximum: Vector3 | null = null;
+
+	meshes.forEach((mesh) => {
+		if (mesh.getTotalVertices() <= 0) {
+			return;
+		}
+
+		mesh.refreshBoundingInfo({
+			applyMorph: true,
+			applySkeleton: true,
+			updatePositionsArray: true,
+		});
+
+		const box = mesh.getBoundingInfo().boundingBox;
+		minimum = minimum ? Vector3.Minimize(minimum, box.minimumWorld) : box.minimumWorld.clone();
+		maximum = maximum ? Vector3.Maximize(maximum, box.maximumWorld) : box.maximumWorld.clone();
+	});
+
+	return minimum && maximum ? Vector3.Center(minimum, maximum) : null;
+}
+
+/**
+ * 将 Vector3 转成可序列化的三元组，便于写入模型 metadata。
+ */
+function vectorToTuple(vector: Vector3): [number, number, number] {
+	return [vector.x, vector.y, vector.z];
 }

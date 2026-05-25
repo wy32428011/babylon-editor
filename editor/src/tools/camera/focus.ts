@@ -12,8 +12,8 @@ export function getCameraFocusPositionFor(target: Vector3, camera: Camera, optio
 	const aspect = camera.getEngine().getAspectRatio(camera);
 	const sizeVec = options.maximum.subtract(options.minimum);
 
-	const verticalSize = sizeVec.y;
-	const horizontalSize = sizeVec.x;
+	const verticalSize = Math.max(sizeVec.y, sizeVec.z);
+	const horizontalSize = Math.max(sizeVec.x, sizeVec.z);
 
 	const verticalDistance = verticalSize / 2 / Math.tan(fov / 2);
 	const horizontalDistance = horizontalSize / 2 / Math.tan((fov * aspect) / 2);

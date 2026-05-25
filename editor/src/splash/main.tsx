@@ -40,7 +40,7 @@ export class Splash extends Component {
 				<div />
 
 				<Fade>
-					<img alt="" src="assets/babylonjs_icon.png" className="w-[200px] object-contain mx-auto" />
+					<img alt="" src="assets/ZENDING_while.png" className="w-[200px] object-contain mx-auto" />
 				</Fade>
 
 				<Fade delay={500}>
