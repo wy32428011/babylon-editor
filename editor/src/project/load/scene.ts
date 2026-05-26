@@ -223,8 +223,11 @@ export async function loadScene(editor: Editor, projectPath: string, scenePath: 
 			const camera = Camera.Parse(config.editorCamera, scene) as EditorCamera | null;
 
 			if (camera) {
+				scene.activeCamera?.detachControl();
+
 				editor.layout.preview.camera.dispose();
 				editor.layout.preview.camera = camera;
+				scene.activeCamera = camera;
 
 				_GetAudioEngine(null).listener.attach(camera);
 
