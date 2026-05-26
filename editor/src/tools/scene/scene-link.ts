@@ -9,12 +9,19 @@ import { isSceneLinkNode } from "../../tools/guards/scene";
 
 import { projectConfiguration } from "../../project/configuration";
 
-export async function createSceneLink(editor: Editor, absolutePath: string) {
+export type CreateSceneLinkOptions = {
+	/**
+	 * 定义场景链接是否继承本次场景加载的低硬件占用模式。
+	 */
+	safeMode?: boolean;
+};
+
+export async function createSceneLink(editor: Editor, absolutePath: string, options?: CreateSceneLinkOptions) {
 	if (!projectConfiguration.path) {
 		return;
 	}
 
-	const node = new SceneLinkNode(basename(absolutePath), editor.layout.preview.scene, editor);
+	const node = new SceneLinkNode(basename(absolutePath), editor.layout.preview.scene, editor, options);
 
 	const relativePath = absolutePath.replace(join(dirname(projectConfiguration.path!), "/"), "");
 	await node.setRelativePath(relativePath);

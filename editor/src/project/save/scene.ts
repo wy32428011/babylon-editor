@@ -34,6 +34,7 @@ import { writeBinaryGeometry } from "../tools/geometry";
 import { writeBinaryMorphTarget } from "../tools/morph-target";
 
 import { showSaveSceneProgressDialog } from "./dialog";
+import { guardProjectSaveWrite } from "./safe-mode";
 
 export function ensureSceneFolders(scenePath: string) {
 	return Promise.all([
@@ -58,15 +59,21 @@ export function ensureSceneFolders(scenePath: string) {
 	]);
 }
 
-export async function saveScene(editor: Editor, projectPath: string, scenePath: string): Promise<void> {
+export async function saveScene(editor: Editor, projectPath: string, scenePath: string): Promise<boolean> {
+	if (!guardProjectSaveWrite(editor)) {
+		return false;
+	}
+
 	const fStat = await stat(scenePath);
 	if (!fStat.isDirectory()) {
-		return editor.layout.console.error("The scene path is not a directory.");
+		editor.layout.console.error("The scene path is not a directory.");
+		return false;
 	}
 
 	const dialog = await showSaveSceneProgressDialog(editor, "Saving scene...");
 
-	const relativeScenePath = scenePath.replace(join(projectPath, "/"), "");
+	try {
+		const relativeScenePath = scenePath.replace(join(projectPath, "/"), "");
 
 	await ensureSceneFolders(scenePath);
 
@@ -837,9 +844,12 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 		})
 	);
 
-	// Update assets cache in all scenes and assets files.
-	dialog.setName("Updating assets links");
-	await applyAssetsCache();
+		// Update assets cache in all scenes and assets files.
+		dialog.setName("Updating assets links");
+		await applyAssetsCache();
 
-	dialog.dispose();
+		return true;
+	} finally {
+		dialog.dispose();
+	}
 }

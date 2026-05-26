@@ -89,6 +89,29 @@ export function trySetCloseDashboardOnProjectOpenInLocalStorage(enabled: boolean
 }
 
 /**
+ * 返回低硬件占用/安全打开模式是否启用。
+ */
+export function tryGetSafeOpenModeFromLocalStorage(): boolean {
+	try {
+		return localStorage.getItem("babylonjs-editor-safe-open-mode") === "true";
+	} catch (e) {
+		return false;
+	}
+}
+
+/**
+ * 将低硬件占用/安全打开模式偏好写入本地存储。
+ * @param enabled 定义是否启用低硬件占用/安全打开模式。
+ */
+export function trySetSafeOpenModeInLocalStorage(enabled: boolean): void {
+	try {
+		localStorage.setItem("babylonjs-editor-safe-open-mode", String(enabled));
+	} catch (e) {
+		// 静默忽略本地存储写入失败。
+	}
+}
+
+/**
  * Returns the terminal path stored in the local storage, or null if it fails to access the local storage or if no terminal path is stored.
  */
 export function tryGetTerminalFromLocalStorage(): string | null {

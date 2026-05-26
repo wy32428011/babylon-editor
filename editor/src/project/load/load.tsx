@@ -8,6 +8,7 @@ import { Editor } from "../../editor/main";
 import packageJson from "../../../package.json";
 
 import { requirePlugin } from "../../tools/plugins/require";
+import { tryGetSafeOpenModeFromLocalStorage } from "../../tools/local-storage";
 import { defaultGizmoSnapPreferences, roundGizmoSnapSteps } from "../../tools/scene/gizmo";
 
 import { projectConfiguration } from "../configuration";
@@ -28,6 +29,7 @@ export async function loadProject(editor: Editor, path: string) {
 	const project = (await readJSON(path, "utf-8")) as IEditorProject;
 	const packageManager = project.packageManager ?? "yarn";
 	const gizmoSnap = roundGizmoSnapSteps({ ...defaultGizmoSnapPreferences, ...(project.gizmoSnap ?? {}) });
+	const safeMode = tryGetSafeOpenModeFromLocalStorage();
 
 	editor.setState({
 		packageManager,
@@ -37,6 +39,7 @@ export async function loadProject(editor: Editor, path: string) {
 
 		compressedTexturesEnabled: project.compressedTexturesEnabled ?? false,
 		compressedTexturesEnabledInPreview: project.compressedTexturesEnabledInPreview ?? false,
+		safeOpenMode: safeMode,
 	});
 
 	editor.layout.forceUpdate();
@@ -56,13 +59,17 @@ export async function loadProject(editor: Editor, path: string) {
 	if (project.lastOpenedScene) {
 		const absolutePath = join(directory, project.lastOpenedScene);
 
+		if (safeMode) {
+			editor.layout.console.log("正在以低硬件占用模式打开项目，部分高占用渲染资源会被跳过。");
+		}
+
 		if (!(await pathExists(absolutePath))) {
 			toast(`Scene "${project.lastOpenedScene}" does not exist.`);
 
 			return editor.layout.console.error(`Scene "${project.lastOpenedScene}" does not exist.`);
 		}
 
-		await loadScene(editor, directory, absolutePath);
+		await loadScene(editor, directory, absolutePath, { safeMode });
 
 		editor.layout.preview.scene.onBeforeRenderObservable.addOnce(() => {
 			editor.layout.graph.refresh();

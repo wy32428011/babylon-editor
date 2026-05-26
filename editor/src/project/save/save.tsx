@@ -18,31 +18,42 @@ import { getBase64SceneScreenshot } from "../../tools/scene/screenshot";
 import { tryGetProjectsFromLocalStorage } from "../../tools/local-storage";
 
 import { saveScene } from "./scene";
+import { guardProjectSaveWrite } from "./safe-mode";
 import { EditorSaveProjectProgressComponent } from "./progress";
 
 let saving = false;
 
-export async function saveProject(editor: Editor): Promise<void> {
+export async function saveProject(editor: Editor): Promise<boolean> {
 	if (saving) {
-		return;
+		return false;
+	}
+
+	if (!guardProjectSaveWrite(editor)) {
+		return false;
 	}
 
 	saving = true;
 
 	try {
-		await _saveProject(editor);
+		return await _saveProject(editor);
 	} catch (e) {
 		if (e instanceof Error) {
 			editor.layout.console.error(`Error saving project:\n ${e.message}`);
 			toast.error("保存项目时出错");
 		}
+
+		return false;
 	} finally {
 		saving = false;
 		editor.layout.preview.setRenderScene(true);
 	}
 }
 
-export async function saveProjectConfiguration(editor: Editor) {
+export async function saveProjectConfiguration(editor: Editor): Promise<Partial<IEditorProject> | null> {
+	if (!guardProjectSaveWrite(editor)) {
+		return null;
+	}
+
 	const project: Partial<IEditorProject> = {
 		plugins: editor.state.plugins.map((plugin) => ({
 			nameOrPath: plugin,
@@ -66,9 +77,9 @@ export async function saveProjectConfiguration(editor: Editor) {
 	return project;
 }
 
-async function _saveProject(editor: Editor) {
+async function _saveProject(editor: Editor): Promise<boolean> {
 	if (!editor.state.projectPath) {
-		return;
+		return false;
 	}
 
 	const toastId = toast(<EditorSaveProjectProgressComponent />, {
@@ -78,10 +89,19 @@ async function _saveProject(editor: Editor) {
 
 	const directory = dirname(editor.state.projectPath);
 	const project = await saveProjectConfiguration(editor);
+	if (!project) {
+		toast.dismiss(toastId);
+		return false;
+	}
 
 	if (editor.state.lastOpenedScenePath) {
 		editor.layout.console.log(`Saving project "${project.lastOpenedScene}"`);
-		await saveScene(editor, directory, editor.state.lastOpenedScenePath);
+		const sceneSaved = await saveScene(editor, directory, editor.state.lastOpenedScenePath);
+		if (!sceneSaved) {
+			toast.dismiss(toastId);
+			return false;
+		}
+
 		editor.layout.console.log(`Project "${project.lastOpenedScene}" saved.`);
 	}
 
@@ -111,6 +131,8 @@ async function _saveProject(editor: Editor) {
 	} catch (e) {
 		// Catch silently.
 	}
+
+	return true;
 
 	// exportProject(editor, {
 	// 	optimize: false,

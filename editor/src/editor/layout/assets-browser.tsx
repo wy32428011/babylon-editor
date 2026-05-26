@@ -440,7 +440,7 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 			this._handleFileRenamed(oldRelativePath, newRelativePath);
 
 			return this.props.editor.setState({ lastOpenedScenePath: newAbsolutePath }, () => {
-				saveProjectConfiguration(this.props.editor);
+				this._saveProjectConfigurationAfterScenePathChanged();
 			});
 		}
 
@@ -468,7 +468,7 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 
 					if (oldSceneAbsolutePath === this.props.editor.state.lastOpenedScenePath) {
 						this.props.editor.setState({ lastOpenedScenePath: file }, () => {
-							saveProjectConfiguration(this.props.editor);
+							this._saveProjectConfigurationAfterScenePathChanged();
 						});
 					}
 				}
@@ -1534,7 +1534,10 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 		});
 
 		if (acceptSave) {
-			await saveProject(this.props.editor);
+			const saved = await saveProject(this.props.editor);
+			if (!saved) {
+				return;
+			}
 		}
 
 		clearUndoRedo();
@@ -1546,7 +1549,9 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 
 		const directory = dirname(this.props.editor.state.projectPath);
 
-		await loadScene(this.props.editor, directory, absolutePath);
+		await loadScene(this.props.editor, directory, absolutePath, {
+			safeMode: this.props.editor.state.safeOpenMode,
+		});
 
 		await this.props.editor.layout.graph.refresh();
 
@@ -1555,6 +1560,14 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 		this.props.editor.layout.inspector.setEditedObject(scene);
 		this.props.editor.layout.animations.setEditedObject(scene);
 		this.props.editor.layout.preview.gizmo.setAttachedObject(null);
+	}
+
+	private _saveProjectConfigurationAfterScenePathChanged(): void {
+		saveProjectConfiguration(this.props.editor).catch((e) => {
+			const message = e instanceof Error ? e.message : String(e);
+			this.props.editor.layout.console.error(`保存项目配置失败：${message}`);
+			toast.error("保存项目配置失败");
+		});
 	}
 
 	private _handleNodeClicked(node: TreeNodeInfo): void {

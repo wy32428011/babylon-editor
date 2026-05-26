@@ -74,6 +74,11 @@ export type SceneLoaderOptions = {
 	 * Defines wether or not the scene is being loaded as link.
 	 */
 	asLink?: boolean;
+
+	/**
+	 * 定义是否以低硬件占用模式加载场景。
+	 */
+	safeMode?: boolean;
 };
 
 export type SceneLoadResult = {
@@ -121,6 +126,7 @@ export async function loadScene(editor: Editor, projectPath: string, scenePath: 
 	} as SceneLoadResult;
 
 	options ??= {};
+	const safeMode = options.safeMode === true;
 
 	const shouldControlPreviewRendering = !options.asLink;
 	let progress: LoadSceneProgressComponent | null = null;
@@ -130,6 +136,9 @@ export async function loadScene(editor: Editor, projectPath: string, scenePath: 
 	}
 
 	editor.layout.console.log(`Loading scene "${relativeScenePath}"`);
+	if (safeMode) {
+		editor.layout.console.log("低硬件占用模式已启用，跳过阴影、粒子、后处理和材质预编译。");
+	}
 
 	try {
 		// Prepare directories
@@ -241,7 +250,7 @@ export async function loadScene(editor: Editor, projectPath: string, scenePath: 
 			scene.environmentIntensity = environment.environmentIntensity ?? scene.environmentIntensity;
 
 			const environmentTexture = environment.environmentTexture;
-			if (environmentTexture) {
+			if (!safeMode && environmentTexture) {
 				if (environmentTexture.name && assetsCache[environmentTexture.name]) {
 					environmentTexture.name = assetsCache[environmentTexture.name].newRelativePath;
 				}
@@ -304,17 +313,23 @@ export async function loadScene(editor: Editor, projectPath: string, scenePath: 
 		await loadLights(editor, lightsFiles, scene, pluginLoadOptions);
 		await loadCameras(editor, cameraFiles, scene, pluginLoadOptions);
 
-		if (!options?.asLink) {
+		if (!safeMode && !options.asLink) {
 			await loadShadowGenerators(editor, shadowGeneratorFiles, scene, pluginLoadOptions);
 		}
 
 		await loadGuis(editor, guiFiles, pluginLoadOptions);
 		await loadSoundNodes(editor, soundNodeFiles, scene, pluginLoadOptions);
-		await loadParticleSystems(editor, particleSystemFiles, scene, pluginLoadOptions);
+		if (!safeMode) {
+			await loadParticleSystems(editor, particleSystemFiles, scene, pluginLoadOptions);
+		}
+
 		await loadAnimationGroups(editor, animationGroupFiles, scene, pluginLoadOptions);
 		await loadSpriteMaps(editor, spriteMapFiles, scene, pluginLoadOptions);
 		await loadSpriteManagers(editor, spriteManagerFiles, scene, pluginLoadOptions);
-		await loadNodeParticleSystemSets(editor, nodeParticleSystemSetFiles, scene, pluginLoadOptions);
+
+		if (!safeMode) {
+			await loadNodeParticleSystemSets(editor, nodeParticleSystemSetFiles, scene, pluginLoadOptions);
+		}
 
 		// Configure textures urls
 		scene.textures.forEach((texture) => {
@@ -376,7 +391,7 @@ export async function loadScene(editor: Editor, projectPath: string, scenePath: 
 						continue;
 					}
 
-					const sceneLink = await createSceneLink(editor, join(projectPath, data._relativePath));
+					const sceneLink = await createSceneLink(editor, join(projectPath, data._relativePath), { safeMode });
 					if (sceneLink) {
 						sceneLink.parse(data);
 
@@ -442,7 +457,7 @@ export async function loadScene(editor: Editor, projectPath: string, scenePath: 
 			editor.layout.preview.clusteredLightContainer.maxRange = config.clusteredLight.maxRange;
 		}
 
-		if (!options?.asLink) {
+		if (!options.asLink) {
 			allNodes.forEach((n) => {
 				if (n.metadata) {
 					delete n.metadata._waitingParentId;
@@ -453,66 +468,73 @@ export async function loadScene(editor: Editor, projectPath: string, scenePath: 
 				}
 			});
 
-			// For each camera
-			const postProcessConfigurations = Array.isArray(config.rendering) ? config.rendering : [];
+			if (!safeMode) {
+				// For each camera
+				const postProcessConfigurations = Array.isArray(config.rendering) ? config.rendering : [];
 
-			postProcessConfigurations.forEach((configuration: any) => {
-				const camera = scene.getCameraById(configuration.cameraId);
-				if (!camera) {
-					return;
-				}
-
-				ssaoRenderingPipelineCameraConfigurations.set(camera, configuration.ssao2RenderingPipeline);
-				vlsPostProcessCameraConfigurations.set(camera, configuration.vlsPostProcess);
-				ssrRenderingPipelineCameraConfigurations.set(camera, configuration.ssrRenderingPipeline);
-				motionBlurPostProcessCameraConfigurations.set(camera, configuration.motionBlurPostProcess);
-				defaultPipelineCameraConfigurations.set(camera, configuration.defaultRenderingPipeline);
-				taaPipelineCameraConfigurations.set(camera, configuration.taaRenderingPipeline);
-				iblShadowsRenderingPipelineCameraConfigurations.set(camera, configuration.iblShadowsRenderPipeline);
-
-				if (isEditorCamera(camera)) {
-					if (configuration.iblShadowsRenderPipeline) {
-						parseIblShadowsRenderingPipeline(editor, configuration.iblShadowsRenderPipeline);
+				postProcessConfigurations.forEach((configuration: any) => {
+					const camera = scene.getCameraById(configuration.cameraId);
+					if (!camera) {
+						return;
 					}
 
-					if (configuration.ssao2RenderingPipeline) {
-						parseSSAO2RenderingPipeline(editor, configuration.ssao2RenderingPipeline);
-					}
+					ssaoRenderingPipelineCameraConfigurations.set(camera, configuration.ssao2RenderingPipeline);
+					vlsPostProcessCameraConfigurations.set(camera, configuration.vlsPostProcess);
+					ssrRenderingPipelineCameraConfigurations.set(camera, configuration.ssrRenderingPipeline);
+					motionBlurPostProcessCameraConfigurations.set(camera, configuration.motionBlurPostProcess);
+					defaultPipelineCameraConfigurations.set(camera, configuration.defaultRenderingPipeline);
+					taaPipelineCameraConfigurations.set(camera, configuration.taaRenderingPipeline);
+					iblShadowsRenderingPipelineCameraConfigurations.set(camera, configuration.iblShadowsRenderPipeline);
 
-					if (configuration.vlsPostProcess) {
-						parseVLSPostProcess(editor, configuration.vlsPostProcess);
-					}
+					if (isEditorCamera(camera)) {
+						if (configuration.iblShadowsRenderPipeline) {
+							parseIblShadowsRenderingPipeline(editor, configuration.iblShadowsRenderPipeline);
+						}
 
-					if (configuration.ssrRenderingPipeline) {
-						parseSSRRenderingPipeline(editor, configuration.ssrRenderingPipeline);
-					}
+						if (configuration.ssao2RenderingPipeline) {
+							parseSSAO2RenderingPipeline(editor, configuration.ssao2RenderingPipeline);
+						}
 
-					if (configuration.motionBlurPostProcess) {
-						parseMotionBlurPostProcess(editor, configuration.motionBlurPostProcess);
-					}
+						if (configuration.vlsPostProcess) {
+							parseVLSPostProcess(editor, configuration.vlsPostProcess);
+						}
 
-					if (configuration.defaultRenderingPipeline) {
-						parseDefaultRenderingPipeline(editor, configuration.defaultRenderingPipeline);
-					}
+						if (configuration.ssrRenderingPipeline) {
+							parseSSRRenderingPipeline(editor, configuration.ssrRenderingPipeline);
+						}
 
-					if (configuration.taaRenderingPipeline) {
-						parseTAARenderingPipeline(editor, configuration.taaRenderingPipeline);
+						if (configuration.motionBlurPostProcess) {
+							parseMotionBlurPostProcess(editor, configuration.motionBlurPostProcess);
+						}
+
+						if (configuration.defaultRenderingPipeline) {
+							parseDefaultRenderingPipeline(editor, configuration.defaultRenderingPipeline);
+						}
+
+						if (configuration.taaRenderingPipeline) {
+							parseTAARenderingPipeline(editor, configuration.taaRenderingPipeline);
+						}
 					}
-				}
-			});
+				});
+			}
 		}
 
 		setTimeout(() => {
 			updateAllLights(scene);
-			updateIblShadowsRenderPipeline(scene, true);
+			if (!safeMode) {
+				updateIblShadowsRenderPipeline(scene, true);
+			}
 
 			if (!options.asLink) {
-				checkProjectCachedCompressedTextures(editor);
+				if (!safeMode) {
+					checkProjectCachedCompressedTextures(editor);
+				}
+
 				editor.layout.preview.setRenderScene(true);
 			}
 		}, 150);
 
-		if (!options?.asLink) {
+		if (!safeMode && !options.asLink) {
 			progress.setName("Compiling materials...");
 			await forceCompileAllSceneMaterials(scene);
 		}

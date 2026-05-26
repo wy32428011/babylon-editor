@@ -54,6 +54,7 @@ import { Editor } from "../main";
 
 import { isVector3 } from "../../tools/guards/math";
 import { isDomTextInputFocused } from "../../tools/dom";
+import { tryGetSafeOpenModeFromLocalStorage } from "../../tools/local-storage";
 import { isNodeLocked } from "../../tools/node/metadata";
 import { registerUndoRedo } from "../../tools/undoredo";
 import { initializeHavok } from "../../tools/physics/init";
@@ -569,23 +570,29 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		Animation.AllowMatricesInterpolation = true;
 		Animation.AllowMatrixDecomposeForInterpolation = true;
 
+		const safeOpenMode = tryGetSafeOpenModeFromLocalStorage();
 		const webGpuSupported = false;
 		// const webGpuSupported = await WebGPUEngine.IsSupportedAsync;
 
 		if (webGpuSupported) {
-			this.engine = await this._createWebgpuEngine(this._workingCanvas);
+			this.engine = await this._createWebgpuEngine(this._workingCanvas, safeOpenMode);
 		} else {
 			this.engine = new Engine(this._workingCanvas, true, {
-				antialias: true,
+				antialias: !safeOpenMode,
 				audioEngine: true,
-				adaptToDeviceRatio: true,
+				adaptToDeviceRatio: !safeOpenMode,
 				disableWebGL2Support: false,
-				useHighPrecisionFloats: true,
-				useHighPrecisionMatrix: true,
-				powerPreference: "high-performance",
+				useHighPrecisionFloats: !safeOpenMode,
+				useHighPrecisionMatrix: !safeOpenMode,
+				powerPreference: safeOpenMode ? "low-power" : "high-performance",
 				failIfMajorPerformanceCaveat: false,
 				useExactSrgbConversions: true,
 			});
+		}
+
+		if (safeOpenMode) {
+			this.engine.setHardwareScalingLevel(2);
+			this.props.editor.layout.console.log("已启用低硬件占用模式，预览渲染将使用保守配置。");
 		}
 
 		this.engine.disableContextMenu = false;
@@ -670,7 +677,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		this.forceUpdate();
 	}
 
-	private async _createWebgpuEngine(canvas: HTMLCanvasElement): Promise<WebGPUEngine> {
+	private async _createWebgpuEngine(canvas: HTMLCanvasElement, safeOpenMode: boolean): Promise<WebGPUEngine> {
 		const glslangJs = require("@babylonjs/core/assets/glslang/glslang.cjs");
 		const glslang = await glslangJs(join(process.cwd(), "../node_modules/@babylonjs/core/assets/glslang/glslang.wasm"));
 
@@ -678,17 +685,17 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		const twgsl = await twgslJs(join(process.cwd(), "../node_modules/@babylonjs/core/assets/twgsl/twgsl.wasm"));
 
 		const engine = new WebGPUEngine(canvas, {
-			antialias: true,
+			antialias: !safeOpenMode,
 			audioEngine: true,
-			adaptToDeviceRatio: true,
+			adaptToDeviceRatio: !safeOpenMode,
 			glslangOptions: {
 				glslang,
 			},
 			twgslOptions: {
 				twgsl,
 			},
-			useHighPrecisionMatrix: true,
-			powerPreference: "high-performance",
+			useHighPrecisionMatrix: !safeOpenMode,
+			powerPreference: safeOpenMode ? "low-power" : "high-performance",
 		});
 
 		await engine.initAsync();

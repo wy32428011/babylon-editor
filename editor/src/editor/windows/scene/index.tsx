@@ -4,6 +4,7 @@ import { ipcRenderer } from "electron";
 import { Component, ReactNode } from "react";
 
 import { loadScene } from "../../../project/load/scene";
+import { tryGetSafeOpenModeFromLocalStorage } from "../../../tools/local-storage";
 import { onProjectConfigurationChangedObservable, projectConfiguration } from "../../../project/configuration";
 
 import { waitUntil } from "../../../tools/tools";
@@ -40,13 +41,16 @@ export default class SceneEditorWindow extends Component<ISceneEditorWindowProps
 		projectConfiguration.path = this.props.projectPath;
 		onProjectConfigurationChangedObservable.notifyObservers(projectConfiguration);
 
+		const safeMode = tryGetSafeOpenModeFromLocalStorage();
+
 		this._editor.setState({
 			lastOpenedScenePath: this.props.scenePath,
+			safeOpenMode: safeMode,
 		});
 
 		const directory = dirname(this.props.projectPath);
 
-		await loadScene(this._editor, directory, this.props.scenePath);
+		await loadScene(this._editor, directory, this.props.scenePath, { safeMode });
 
 		this._editor.layout.graph.refresh();
 		this._editor.layout.inspector.setEditedObject(this._editor.layout.preview.scene);

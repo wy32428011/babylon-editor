@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../ui/shadcn/ui/dialog";
 
 import { isWindows } from "../tools/os";
-import { tryGetTerminalFromLocalStorage, trySetTerminalInLocalStorage } from "../tools/local-storage";
+import { tryGetSafeOpenModeFromLocalStorage, tryGetTerminalFromLocalStorage, trySetSafeOpenModeInLocalStorage, trySetTerminalInLocalStorage } from "../tools/local-storage";
 
 export interface IDashboardPreferencesProps {
 	isOpened: boolean;
@@ -25,6 +25,10 @@ export function DashboardPreferences(props: IDashboardPreferencesProps) {
 	const [powerShellPath, setPowerShellPath] = useState<string | null>(null);
 
 	const [selectedTerminal, setSelectedTerminal] = useState<string>(tryGetTerminalFromLocalStorage() ?? "");
+	const [safeOpenMode, setSafeOpenMode] = useState<boolean>(tryGetSafeOpenModeFromLocalStorage());
+
+	const safeOpenModeSwitchId = "safe-open-mode-switch";
+	const safeOpenModeDescriptionId = "safe-open-mode-description";
 
 	useEffect(() => {
 		if (isWindows()) {
@@ -43,9 +47,14 @@ export function DashboardPreferences(props: IDashboardPreferencesProps) {
 		}
 	}, []);
 
-	function handleTerminalChanged(value: string) {
+	function handleTerminalChanged(value: string): void {
 		setSelectedTerminal(value);
 		trySetTerminalInLocalStorage(value);
+	}
+
+	function handleSafeOpenModeChanged(enabled: boolean): void {
+		setSafeOpenMode(enabled);
+		trySetSafeOpenModeInLocalStorage(enabled);
 	}
 
 	return (
@@ -66,6 +75,22 @@ export function DashboardPreferences(props: IDashboardPreferencesProps) {
 							<div className="text-start w-full">打开项目后关闭仪表盘</div>
 							<div className="flex justify-end">
 								<Switch checked={props.closeDashboardOnProjectOpen} />
+							</div>
+						</div>
+					</div>
+
+					<Separator />
+
+					<div className="flex flex-col gap-2">
+						<div id={safeOpenModeDescriptionId} className="text-muted-foreground">
+							启用后，打开项目时会降低预览渲染压力，并跳过阴影、粒子、后处理和材质预编译等高占用步骤，适合打开项目黑屏或显卡驱动不稳定时使用。
+						</div>
+						<div className="flex items-center gap-4 w-full">
+							<label htmlFor={safeOpenModeSwitchId} className="text-start w-full cursor-pointer">
+								低硬件占用/安全打开模式
+							</label>
+							<div className="flex justify-end">
+								<Switch id={safeOpenModeSwitchId} checked={safeOpenMode} aria-describedby={safeOpenModeDescriptionId} onCheckedChange={handleSafeOpenModeChanged} />
 							</div>
 						</div>
 					</div>

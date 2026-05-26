@@ -1,5 +1,5 @@
 import { toast } from "sonner";
-import { Component, ReactNode } from "react";
+import { Component, MouseEvent, ReactNode } from "react";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../../ui/shadcn/ui/tabs";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../../../ui/shadcn/ui/alert-dialog";
@@ -59,7 +59,7 @@ export class EditorEditProjectComponent extends Component<IEditorEditProjectComp
 						<AlertDialogCancel className="w-20" onClick={() => this.props.onClose()}>
 							取消
 						</AlertDialogCancel>
-						<AlertDialogAction className="w-20" onClick={() => this._handleSave()}>
+						<AlertDialogAction className="w-20" onClick={(e) => this._handleSave(e)}>
 							保存
 						</AlertDialogAction>
 					</AlertDialogFooter>
@@ -68,14 +68,25 @@ export class EditorEditProjectComponent extends Component<IEditorEditProjectComp
 		);
 	}
 
-	private _handleSave(): void {
-		projectConfiguration.compressedTexturesEnabled = this.props.editor.state.compressedTexturesEnabled;
+	private async _handleSave(e: MouseEvent<HTMLButtonElement>): Promise<void> {
+		e.preventDefault();
 
-		saveProjectConfiguration(this.props.editor);
-		checkProjectCachedCompressedTextures(this.props.editor);
+		try {
+			const project = await saveProjectConfiguration(this.props.editor);
+			if (!project) {
+				return;
+			}
 
-		toast.success("Project preferences saved");
+			projectConfiguration.compressedTexturesEnabled = this.props.editor.state.compressedTexturesEnabled;
+			checkProjectCachedCompressedTextures(this.props.editor);
 
-		this.props.onClose();
+			toast.success("Project preferences saved");
+
+			this.props.onClose();
+		} catch (e) {
+			const message = e instanceof Error ? e.message : String(e);
+			this.props.editor.layout.console.error(`保存项目偏好失败：${message}`);
+			toast.error("保存项目偏好失败");
+		}
 	}
 }

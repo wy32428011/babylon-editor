@@ -102,6 +102,10 @@ export interface IEditorState {
 	 */
 	enableExperimentalFeatures: boolean;
 	/**
+	 * 定义当前项目是否以低硬件占用模式打开。
+	 */
+	safeOpenMode: boolean;
+	/**
 	 * Defines the list of tabs that are currently opened in the layout.
 	 */
 	openedTabs: string[];
@@ -156,6 +160,7 @@ export class Editor extends Component<IEditorProps, IEditorState> {
 			compressedTexturesEnabled: false,
 			compressedTexturesEnabledInPreview: false,
 			enableExperimentalFeatures: tryGetExperimentalFeaturesEnabledFromLocalStorage(),
+			safeOpenMode: false,
 			openedTabs: [],
 
 			editProject: false,

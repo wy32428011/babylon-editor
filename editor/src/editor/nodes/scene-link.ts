@@ -6,11 +6,14 @@ import { UniqueNumber } from "../../tools/tools";
 
 import { projectConfiguration } from "../../project/configuration";
 import { loadScene, SceneLoadResult } from "../../project/load/scene";
+import type { CreateSceneLinkOptions } from "../../tools/scene/scene-link";
 
 import { Editor } from "../main";
 
 export class SceneLinkNode extends TransformNode {
 	private _editor: Editor;
+
+	private _safeMode: boolean | undefined;
 
 	private _lastLoadResult: SceneLoadResult | null = null;
 
@@ -26,10 +29,11 @@ export class SceneLinkNode extends TransformNode {
 	 * @param name defines the name of the scene component.
 	 * @param scene defines the reference to the scene where to add the scene component.
 	 */
-	public constructor(name: string, scene: Scene, editor: Editor) {
+	public constructor(name: string, scene: Scene, editor: Editor, options?: CreateSceneLinkOptions) {
 		super(name, scene);
 
 		this._editor = editor;
+		this._safeMode = options?.safeMode;
 
 		this.id = Tools.RandomId();
 		this.uniqueId = UniqueNumber.Get();
@@ -57,6 +61,7 @@ export class SceneLinkNode extends TransformNode {
 
 		this._lastLoadResult = await loadScene(this._editor, projectDir, absolutePath, {
 			asLink: true,
+			safeMode: this._safeMode ?? this._editor.state.safeOpenMode,
 		});
 
 		this._lastLoadResult?.meshes.forEach((mesh) => !mesh.parent && (mesh.parent = this));
