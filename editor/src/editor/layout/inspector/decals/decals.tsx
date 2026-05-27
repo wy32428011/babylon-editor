@@ -71,7 +71,7 @@ export class EditorDecalsInspector extends Component<IEditorDecalsInspectorProps
 							object={decalsConfiguration.size}
 							property="x"
 							step={1}
-							label="宽度"
+							label="宽度 (m)"
 							noUndoRedo
 							onChange={() => this._handleUpdateCurrentDecalMesh()}
 						/>
@@ -79,7 +79,7 @@ export class EditorDecalsInspector extends Component<IEditorDecalsInspectorProps
 							object={decalsConfiguration.size}
 							property="y"
 							step={1}
-							label="高度"
+							label="高度 (m)"
 							noUndoRedo
 							onChange={() => this._handleUpdateCurrentDecalMesh()}
 						/>

@@ -126,8 +126,8 @@ export class EditorGPUParticleSystemInspector extends Component<IEditorInspector
 				</EditorInspectorSectionField>
 
 				<EditorInspectorSectionField title="变换">
-					<EditorInspectorVectorField object={this.props.object} property="worldOffset" label="偏移" />
-					<EditorInspectorVectorField object={this.props.object} property="gravity" label="重力" />
+					<EditorInspectorVectorField object={this.props.object} property="worldOffset" label="偏移 (m)" />
+					<EditorInspectorVectorField object={this.props.object} property="gravity" label="重力 (m/s²)" />
 				</EditorInspectorSectionField>
 
 				<EditorInspectorSectionField title="纹理">
@@ -196,12 +196,7 @@ export class EditorGPUParticleSystemInspector extends Component<IEditorInspector
 				{this._getEmitterTypeInspector()}
 
 				<EditorInspectorSectionField title="动画序列帧">
-					<EditorInspectorSwitchField
-						object={this.props.object}
-						property="isAnimationSheetEnabled"
-						label="启用动画序列帧"
-						onChange={() => this.forceUpdate()}
-					/>
+					<EditorInspectorSwitchField object={this.props.object} property="isAnimationSheetEnabled" label="启用动画序列帧" onChange={() => this.forceUpdate()} />
 
 					{this.props.object.isAnimationSheetEnabled && (
 						<>
@@ -292,9 +287,7 @@ export class EditorGPUParticleSystemInspector extends Component<IEditorInspector
 			this.props.object._randomTexture2 = texture2;
 		};
 
-		return (
-			<EditorInspectorListField object={this} property="_randomTextureSize" label="随机纹理大小" onChange={(v) => onRandomTextureSizeChanged(v)} items={this._sizes} />
-		);
+		return <EditorInspectorListField object={this} property="_randomTextureSize" label="随机纹理大小" onChange={(v) => onRandomTextureSizeChanged(v)} items={this._sizes} />;
 	}
 
 	private _getEmitterTypeInspector(): ReactNode {
@@ -380,7 +373,7 @@ export class EditorGPUParticleSystemInspector extends Component<IEditorInspector
 						</EditorInspectorBlockField>
 
 						<EditorInspectorBlockField>
-							<div className="px-2">Emit Box</div>
+							<div className="px-2">Emit Box (m)</div>
 							<EditorInspectorVectorField grayLabel object={emitter} property="minEmitBox" label="最小值" />
 							<EditorInspectorVectorField grayLabel object={emitter} property="maxEmitBox" label="最大值" />
 						</EditorInspectorBlockField>
@@ -389,11 +382,11 @@ export class EditorGPUParticleSystemInspector extends Component<IEditorInspector
 
 				{(emitter.getClassName() === "ConeParticleEmitter" || emitter.getClassName() === "ConeDirectedParticleEmitter") && (
 					<>
-						<EditorInspectorNumberField object={emitter} property="radius" label="半径" />
+						<EditorInspectorNumberField object={emitter} property="radius" label="半径 (m)" />
 						<EditorInspectorNumberField object={emitter} property="angle" label="角度" />
 
-						<EditorInspectorNumberField object={emitter} property="radiusRange" label="Radius Range" />
-						<EditorInspectorNumberField object={emitter} property="heightRange" label="Height Range" />
+						<EditorInspectorNumberField object={emitter} property="radiusRange" label="半径范围 (m)" />
+						<EditorInspectorNumberField object={emitter} property="heightRange" label="高度范围 (m)" />
 
 						<EditorInspectorSwitchField object={emitter} property="emitFromSpawnPointOnly" label="仅从生成点发射" />
 
@@ -411,10 +404,10 @@ export class EditorGPUParticleSystemInspector extends Component<IEditorInspector
 
 				{(emitter.getClassName() === "CylinderParticleEmitter" || emitter.getClassName() === "CylinderDirectedParticleEmitter") && (
 					<>
-						<EditorInspectorNumberField object={emitter} property="radius" label="半径" />
-						<EditorInspectorNumberField object={emitter} property="height" label="高度" />
+						<EditorInspectorNumberField object={emitter} property="radius" label="半径 (m)" />
+						<EditorInspectorNumberField object={emitter} property="height" label="高度 (m)" />
 
-						<EditorInspectorNumberField object={emitter} property="radiusRange" label="Radius Range" />
+						<EditorInspectorNumberField object={emitter} property="radiusRange" label="半径范围 (m)" />
 						<EditorInspectorNumberField object={emitter} property="directionRandomizer" label="方向随机化" />
 
 						{emitter.getClassName() === "CylinderDirectedParticleEmitter" && (
@@ -431,8 +424,8 @@ export class EditorGPUParticleSystemInspector extends Component<IEditorInspector
 
 				{(emitter.getClassName() === "SphereParticleEmitter" || emitter.getClassName() === "SphereDirectedParticleEmitter") && (
 					<>
-						<EditorInspectorNumberField object={emitter} property="radius" label="半径" />
-						<EditorInspectorNumberField object={emitter} property="radiusRange" label="Radius Range" />
+						<EditorInspectorNumberField object={emitter} property="radius" label="半径 (m)" />
+						<EditorInspectorNumberField object={emitter} property="radiusRange" label="半径范围 (m)" />
 						<EditorInspectorNumberField object={emitter} property="directionRandomizer" label="方向随机化" />
 
 						{emitter.getClassName() === "SphereDirectedParticleEmitter" && (
@@ -459,8 +452,8 @@ export class EditorGPUParticleSystemInspector extends Component<IEditorInspector
 
 				{emitter.getClassName() === "HemisphericParticleEmitter" && (
 					<>
-						<EditorInspectorNumberField object={emitter} property="radius" label="半径" />
-						<EditorInspectorNumberField object={emitter} property="radiusRange" label="Radius Range" />
+						<EditorInspectorNumberField object={emitter} property="radius" label="半径 (m)" />
+						<EditorInspectorNumberField object={emitter} property="radiusRange" label="半径范围 (m)" />
 						<EditorInspectorNumberField object={emitter} property="directionRandomizer" label="方向随机化" />
 					</>
 				)}

@@ -20,6 +20,7 @@ import { BaseTexture, Node, Scene, Tools, IParticleSystem, Sprite, Skeleton, Tra
 
 import { Editor } from "../main";
 
+import { Switch } from "../../ui/shadcn/ui/switch";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../../ui/shadcn/ui/dropdown-menu";
 import {
 	ContextMenu,
@@ -89,6 +90,15 @@ import { EditorGraphLabel } from "./graph/label";
 import { EditorGraphContextMenu } from "./graph/context-menu";
 import { setNewParentForGraphSelectedNodes } from "./graph/move";
 
+const DEFAULT_SCENE_NODE_IDS = new Set([
+	"6a927ea7-51d9-4248-9b80-4d34b53b386e",
+	"0fe36208-15f6-4366-a95f-7a324d858364",
+	"c04fac55-2089-4c99-bb08-39044d112145",
+	"9242a5b8-a8b8-41d2-94ea-968e4fc3dd61",
+	"3ee0f345-7bea-4f59-a657-28c90a7d5e74",
+]);
+const DEFAULT_SCENE_MESH_NAMES = new Set(["sky", "ground", "box"]);
+
 export interface IEditorGraphProps {
 	/**
 	 * The editor reference.
@@ -124,6 +134,11 @@ export interface IEditorGraphState {
 	 * Defines wether or not instanced meshes should be hidden from the graph.
 	 */
 	hideInstancedMeshes: boolean;
+
+	/**
+	 * 定义是否在层级图中显示模板默认场景节点。
+	 */
+	showDefaultSceneNodes: boolean;
 }
 
 export class EditorGraph extends Component<IEditorGraphProps, IEditorGraphState> {
@@ -142,6 +157,7 @@ export class EditorGraph extends Component<IEditorGraphProps, IEditorGraphState>
 			showOnlyDecals: false,
 
 			hideInstancedMeshes: false,
+			showDefaultSceneNodes: false,
 		};
 
 		onNodesAddedObservable.add(() => this.refresh());
@@ -185,6 +201,21 @@ export class EditorGraph extends Component<IEditorGraphProps, IEditorGraphState>
 								}}
 							>
 								{this.state.hideInstancedMeshes ? <IoCheckmark /> : ""} Hide Instanced Meshes
+							</DropdownMenuItem>
+							<DropdownMenuItem
+								className="flex gap-3 items-center justify-between"
+								onClick={() => {
+									this.setState({ showDefaultSceneNodes: !this.state.showDefaultSceneNodes }, () => this.refresh());
+								}}
+							>
+								<span>显示默认场景节点</span>
+								<Switch
+									checked={this.state.showDefaultSceneNodes}
+									onClick={(ev) => ev.stopPropagation()}
+									onCheckedChange={(checked) => {
+										this.setState({ showDefaultSceneNodes: checked }, () => this.refresh());
+									}}
+								/>
 							</DropdownMenuItem>
 							<DropdownMenuSeparator />
 							<DropdownMenuItem
@@ -846,6 +877,10 @@ export class EditorGraph extends Component<IEditorGraphProps, IEditorGraphState>
 	}
 
 	private _parseSceneNode(node: Node, noChildren?: boolean): TreeNodeInfo | null {
+		if (!this.state.showDefaultSceneNodes && this._isDefaultSceneNode(node)) {
+			return null;
+		}
+
 		if ((isMesh(node) && (node._masterMesh || !isNodeVisibleInGraph(node))) || isCollisionMesh(node) || isCollisionInstancedMesh(node)) {
 			return null;
 		}
@@ -946,6 +981,22 @@ export class EditorGraph extends Component<IEditorGraphProps, IEditorGraphState>
 		});
 
 		return info;
+	}
+
+	/**
+	 * 判断节点是否属于模板自带的默认场景基础节点。
+	 */
+	private _isDefaultSceneNode(node: Node): boolean {
+		if (DEFAULT_SCENE_NODE_IDS.has(node.id)) {
+			return true;
+		}
+
+		if (node.parent) {
+			return false;
+		}
+
+		const name = node.name.toLowerCase();
+		return (isMesh(node) && DEFAULT_SCENE_MESH_NAMES.has(name)) || (isLight(node) && name === "sun") || (isCamera(node) && name === "camera");
 	}
 
 	private _getNodeIconComponent(node: Node): ReactNode {

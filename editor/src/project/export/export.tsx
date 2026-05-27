@@ -24,6 +24,7 @@ import { motionBlurPostProcessCameraConfigurations } from "../../editor/renderin
 
 import { Editor } from "../../editor/main";
 
+import { ensureSceneMetadataSpace } from "../space";
 import { writeBinaryGeometry } from "../tools/geometry";
 
 import { processAssetFile } from "./assets";
@@ -138,6 +139,7 @@ async function _exportProject(editor: Editor, options: IExportProjectOptions): P
 	}
 
 	data.metadata ??= {};
+	data.metadata = ensureSceneMetadataSpace(data.metadata);
 
 	data.metadata.rendering = scene.cameras
 		.filter((camera) => !isEditorCamera(camera))

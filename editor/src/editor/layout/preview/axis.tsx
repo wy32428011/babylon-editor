@@ -60,7 +60,7 @@ export class EditorPreviewAxisHelper extends Component<IEditorPreviewAxisHelperP
 				<div
 					className="absolute text-black/50 text-xs font-semibold -translate-x-1/2 -translate-y-1/2 pointer-events-none"
 					style={{
-						top: `calc(100% - calc(164px - ${this.state.xLabelPosition.y}px))`,
+						top: `${this.state.xLabelPosition.y}px`,
 						left: `${this.state.xLabelPosition.x}px`,
 					}}
 				>
@@ -70,7 +70,7 @@ export class EditorPreviewAxisHelper extends Component<IEditorPreviewAxisHelperP
 				<div
 					className="absolute text-black/50 text-xs font-semibold -translate-x-1/2 -translate-y-1/2 pointer-events-none"
 					style={{
-						top: `calc(100% - calc(164px - ${this.state.yLabelPosition.y}px))`,
+						top: `${this.state.yLabelPosition.y}px`,
 						left: `${this.state.yLabelPosition.x}px`,
 					}}
 				>
@@ -80,7 +80,7 @@ export class EditorPreviewAxisHelper extends Component<IEditorPreviewAxisHelperP
 				<div
 					className="absolute text-black/50 text-xs font-semibold -translate-x-1/2 -translate-y-1/2 pointer-events-none"
 					style={{
-						top: `calc(100% - calc(164px - ${this.state.zLabelPosition.y}px))`,
+						top: `${this.state.zLabelPosition.y}px`,
 						left: `${this.state.zLabelPosition.x}px`,
 					}}
 				>
@@ -130,7 +130,10 @@ export class EditorPreviewAxisHelper extends Component<IEditorPreviewAxisHelperP
 		this._createNegativeAlphaSphere(dummy, new Vector3(0, -0.25, 0));
 		this._createNegativeAlphaSphere(dummy, new Vector3(0, 0, -0.25));
 
-		const absoluteSize = 164 * devicePixelRatio;
+		const axisHelperSize = 164;
+		const axisHelperPadding = 16;
+		const absoluteSize = axisHelperSize * devicePixelRatio;
+		const absolutePadding = axisHelperPadding * devicePixelRatio;
 		const engine = this.props.editor.layout.preview.engine!;
 
 		this.scene.onBeforeRenderObservable.add(() => {
@@ -141,13 +144,22 @@ export class EditorPreviewAxisHelper extends Component<IEditorPreviewAxisHelperP
 
 			const width = absoluteSize / engine.getRenderWidth();
 			const height = absoluteSize / engine.getRenderHeight();
+			const paddingX = absolutePadding / engine.getRenderWidth();
+			const paddingY = absolutePadding / engine.getRenderHeight();
+			const renderHeight = engine.getRenderHeight() * engine.getHardwareScalingLevel();
 
-			camera.viewport = new Viewport(1 - width, 0, width, height);
+			camera.viewport = new Viewport(1 - width - paddingX, 1 - height - paddingY, width, height);
+
+			const getLabelPosition = (mesh: Mesh) => {
+				const position = projectVectorOnScreen(mesh.computeWorldMatrix(true).getTranslation(), this.scene!);
+				position.y = position.y - renderHeight + axisHelperSize + axisHelperPadding * 2;
+				return position;
+			};
 
 			this.setState({
-				xLabelPosition: projectVectorOnScreen(xSphere.computeWorldMatrix(true).getTranslation(), this.scene!),
-				yLabelPosition: projectVectorOnScreen(ySphere.computeWorldMatrix(true).getTranslation(), this.scene!),
-				zLabelPosition: projectVectorOnScreen(zSphere.computeWorldMatrix(true).getTranslation(), this.scene!),
+				xLabelPosition: getLabelPosition(xSphere),
+				yLabelPosition: getLabelPosition(ySphere),
+				zLabelPosition: getLabelPosition(zSphere),
 			});
 
 			this._checkAxisUnderPointer();

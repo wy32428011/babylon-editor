@@ -101,8 +101,7 @@ export function DashboardPreferences(props: IDashboardPreferencesProps) {
 
 							<div className="flex flex-col gap-2">
 								<div className="text-muted-foreground">
-									Windows 默认可能使用 PowerShell 作为终端。PowerShell 默认禁用脚本执行，可能影响 Babylon.js Editor。
-									可以将默认终端切换为 CMD 来避免此问题。
+									Windows 默认可能使用 PowerShell 作为终端。PowerShell 默认禁用脚本执行，可能影响 Babylon.js Editor。 可以将默认终端切换为 CMD 来避免此问题。
 								</div>
 
 								<div className="flex items-center gap-4 w-full">

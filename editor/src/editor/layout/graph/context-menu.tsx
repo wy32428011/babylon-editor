@@ -1,11 +1,12 @@
 import { platform } from "os";
 
-import { Component, PropsWithChildren, ReactNode } from "react";
+import { Component, PropsWithChildren, ReactNode, useState } from "react";
 
+import { toast } from "sonner";
 import { IoMdCube } from "react-icons/io";
 import { AiOutlinePlus, AiOutlineClose } from "react-icons/ai";
 
-import { Mesh, Node, InstancedMesh, Sprite, IParticleSystem } from "babylonjs";
+import { AbstractMesh, Mesh, Node, InstancedMesh, Sprite, IParticleSystem, TransformNode, Vector3 } from "babylonjs";
 
 import {
 	ContextMenu,
@@ -19,6 +20,7 @@ import {
 	ContextMenuShortcut,
 	ContextMenuCheckboxItem,
 } from "../../../ui/shadcn/ui/context-menu";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../ui/shadcn/ui/select";
 
 import { showConfirm } from "../../../ui/dialog";
 import { Separator } from "../../../ui/shadcn/ui/separator";
@@ -37,6 +39,7 @@ import { onNodesAddedObservable } from "../../../tools/observables";
 import { isAnyParticleSystem } from "../../../tools/guards/particles";
 import { isScene, isSceneLinkNode } from "../../../tools/guards/scene";
 import { cloneNode, ICloneNodeOptions } from "../../../tools/node/clone";
+import { createNodeArray, ICreatedNodeArray, INodeArrayOptions, MAX_NODE_ARRAY_ITEMS, NodeArrayMode, NodeArrayShape, validateNodeArrayOptions } from "../../../tools/node/array";
 import { isSprite, isSpriteMapNode } from "../../../tools/guards/sprites";
 import { isNodeLocked, isNodeSerializable, isNodeVisibleInGraph, setNodeLocked, setNodeSerializable } from "../../../tools/node/metadata";
 import { isAbstractMesh, isCamera, isClusteredLightContainer, isLight, isMesh, isNode, isTransformNode } from "../../../tools/guards/nodes";
@@ -47,6 +50,8 @@ import { addGPUParticleSystem, addParticleSystem } from "../../../project/add/pa
 import { addSoundNode } from "../../../project/add/sound";
 
 import { EditorInspectorSwitchField } from "../inspector/fields/switch";
+import { EditorInspectorNumberField } from "../inspector/fields/number";
+import { EditorInspectorVectorField } from "../inspector/fields/vector";
 
 import { configureImportedMaterial, configureImportedNodeIds } from "../preview/import/import";
 
@@ -65,6 +70,91 @@ export interface IEditorGraphContextMenuProps extends PropsWithChildren {
 
 export interface IEditorGraphContextMenuState {
 	selectedMeshes: Mesh[];
+}
+
+interface INodeArrayOptionsContentProps {
+	options: INodeArrayOptions;
+}
+
+/**
+ * 显示一次性模型阵列的创建参数。
+ */
+function NodeArrayOptionsContent(props: INodeArrayOptionsContentProps): ReactNode {
+	const [mode, setMode] = useState<NodeArrayMode>(props.options.mode);
+	const [shape, setShape] = useState<NodeArrayShape>(props.options.shape);
+
+	return (
+		<div className="flex flex-col gap-3 min-w-96 text-foreground">
+			<Separator />
+
+			<div className="grid grid-cols-2 gap-3">
+				<div className="flex flex-col gap-1">
+					<div className="text-sm text-muted-foreground">模式</div>
+					<Select
+						value={mode}
+						onValueChange={(value) => {
+							props.options.mode = value as NodeArrayMode;
+							setMode(props.options.mode);
+						}}
+					>
+						<SelectTrigger>
+							<SelectValue placeholder="模式" />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="instance">实例</SelectItem>
+							<SelectItem value="clone">克隆</SelectItem>
+						</SelectContent>
+					</Select>
+				</div>
+
+				<div className="flex flex-col gap-1">
+					<div className="text-sm text-muted-foreground">类型</div>
+					<Select
+						value={shape}
+						onValueChange={(value) => {
+							props.options.shape = value as NodeArrayShape;
+							setShape(props.options.shape);
+						}}
+					>
+						<SelectTrigger>
+							<SelectValue placeholder="类型" />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="linear">线性</SelectItem>
+							<SelectItem value="grid">网格</SelectItem>
+						</SelectContent>
+					</Select>
+				</div>
+			</div>
+
+			{shape === "linear" ? (
+				<EditorInspectorNumberField noUndoRedo min={1} max={MAX_NODE_ARRAY_ITEMS} step={1} object={props.options} property="count" label="数量" />
+			) : (
+				<div className="flex flex-col gap-2">
+					<EditorInspectorNumberField noUndoRedo min={1} max={MAX_NODE_ARRAY_ITEMS} step={1} object={props.options} property="countX" label="X 数量" />
+					<EditorInspectorNumberField noUndoRedo min={1} max={MAX_NODE_ARRAY_ITEMS} step={1} object={props.options} property="countY" label="Y 数量" />
+					<EditorInspectorNumberField noUndoRedo min={1} max={MAX_NODE_ARRAY_ITEMS} step={1} object={props.options} property="countZ" label="Z 数量" />
+				</div>
+			)}
+
+			<EditorInspectorVectorField noUndoRedo step={1} object={props.options} property="spacing" label="间距" />
+			<EditorInspectorSwitchField noUndoRedo object={props.options} property="createGroupRoot" label="创建阵列分组根节点" />
+
+			{mode === "clone" && (
+				<div className="flex flex-col gap-1">
+					<div className="text-muted font-semibold">克隆选项</div>
+					<EditorInspectorSwitchField noUndoRedo object={props.options.cloneOptions} property="shareGeometry" label="共享几何体" />
+					<EditorInspectorSwitchField noUndoRedo object={props.options.cloneOptions} property="shareSkeleton" label="共享骨骼" />
+					<EditorInspectorSwitchField noUndoRedo object={props.options.cloneOptions} property="cloneMaterial" label="克隆材质" />
+					<EditorInspectorSwitchField noUndoRedo object={props.options.cloneOptions} property="cloneThinInstances" label="克隆 Thin Instances" />
+				</div>
+			)}
+
+			<div className="text-xs text-muted-foreground whitespace-pre-line">
+				实例模式复用源网格的几何体和材质，适合大量重复模型；克隆模式会创建普通副本，更适合后续独立编辑。阵列总数不能超过 {MAX_NODE_ARRAY_ITEMS}。
+			</div>
+		</div>
+	);
 }
 
 export class EditorGraphContextMenu extends Component<IEditorGraphContextMenuProps, IEditorGraphContextMenuState> {
@@ -96,6 +186,7 @@ export class EditorGraphContextMenu extends Component<IEditorGraphContextMenuPro
 							{!isScene(this.props.object) && !isClusteredLightContainer(this.props.object) && (
 								<>
 									<ContextMenuItem onClick={() => this._cloneNode(this.props.object)}>克隆</ContextMenuItem>
+									{this._canCreateNodeArray(this.props.object) && <ContextMenuItem onClick={() => this._createNodeArray(this.props.object)}>创建阵列...</ContextMenuItem>}
 
 									{!isSprite(this.props.object) && (
 										<>
@@ -397,6 +488,91 @@ export class EditorGraphContextMenu extends Component<IEditorGraphContextMenuPro
 			},
 			redo: () => {
 				instance = createMeshInstance(this.props.editor, mesh);
+			},
+		});
+	}
+
+	/**
+	 * 判断当前右键对象是否支持创建模型阵列。
+	 */
+	private _canCreateNodeArray(object: unknown): object is TransformNode | AbstractMesh {
+		return isTransformNode(object) || isAbstractMesh(object);
+	}
+
+	/**
+	 * 弹出阵列配置并把生成、撤销、重做接入编辑器历史。
+	 */
+	private async _createNodeArray(source: TransformNode | AbstractMesh): Promise<void> {
+		const options: INodeArrayOptions = {
+			mode: "instance",
+			shape: "linear",
+			count: 5,
+			countX: 3,
+			countY: 1,
+			countZ: 3,
+			spacing: new Vector3(200, 0, 0),
+			createGroupRoot: true,
+			cloneOptions: {
+				shareGeometry: true,
+				shareSkeleton: true,
+				cloneMaterial: false,
+				cloneThinInstances: true,
+			},
+		};
+
+		const result = await showConfirm("创建阵列", <NodeArrayOptionsContent options={options} />, {
+			asChild: true,
+			confirmText: "创建",
+		});
+		if (!result) {
+			return;
+		}
+
+		try {
+			validateNodeArrayOptions(options);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : "阵列参数无效。");
+			return;
+		}
+
+		let createdArray: ICreatedNodeArray | null = null;
+
+		registerUndoRedo({
+			executeRedo: true,
+			action: () => {
+				this.props.editor.layout.graph.refresh();
+
+				waitNextAnimationFrame().then(() => {
+					const selectedNode = createdArray?.root ?? createdArray?.nodes[0] ?? null;
+					if (selectedNode) {
+						this.props.editor.layout.graph.setSelectedNode(selectedNode);
+						this.props.editor.layout.animations.setEditedObject(selectedNode);
+					}
+
+					this.props.editor.layout.inspector.setEditedObject(selectedNode);
+					this.props.editor.layout.preview.gizmo.setAttachedObject(selectedNode);
+				});
+			},
+			undo: () => {
+				if (createdArray?.root) {
+					createdArray.root.dispose(false, false);
+				} else if (createdArray) {
+					const createdNodes = new Set(createdArray.nodes);
+					createdArray.nodes.filter((node) => !createdNodes.has(node.parent as Node)).forEach((node) => node.dispose(false, false));
+				}
+				createdArray = null;
+			},
+			redo: () => {
+				try {
+					createdArray = createNodeArray(this.props.editor, source, options);
+					onNodesAddedObservable.notifyObservers();
+					if (!createdArray.root && !createdArray.nodes.length) {
+						toast.warning("没有找到可用于创建阵列的模型网格。");
+					}
+				} catch (e) {
+					createdArray = null;
+					toast.error(e instanceof Error ? e.message : "创建阵列失败。");
+				}
 			},
 		});
 	}

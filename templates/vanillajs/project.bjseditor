@@ -2,6 +2,10 @@
     "plugins": [],
     "version": "5.0.0",
     "packageManager": "yarn",
+    "space": {
+        "worldUnit": "m",
+        "metersPerUnit": 1
+    },
     "lastOpenedScene": "/assets/example.scene",
     "compressedTexturesEnabled": false,
     "compressedTexturesEnabledInPreview": false

@@ -36,9 +36,9 @@ export function BoxMeshGeometryInspector(props: IBoxMeshGeometryInspectorProps) 
 
 	return (
 		<EditorInspectorSectionField title="盒体">
-			<EditorInspectorNumberField object={proxy} property="width" label="宽度" step={0.1} />
-			<EditorInspectorNumberField object={proxy} property="height" label="高度" step={0.1} />
-			<EditorInspectorNumberField object={proxy} property="depth" label="深度" step={0.1} />
+			<EditorInspectorNumberField object={proxy} property="width" label="宽度 (m)" step={0.1} />
+			<EditorInspectorNumberField object={proxy} property="height" label="高度 (m)" step={0.1} />
+			<EditorInspectorNumberField object={proxy} property="depth" label="深度 (m)" step={0.1} />
 			<EditorInspectorListField
 				object={proxy}
 				property="sideOrientation"

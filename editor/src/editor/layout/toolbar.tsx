@@ -160,9 +160,11 @@ export class EditorToolbar extends Component<IEditorToolbarProps> {
 							<MenubarItem onClick={() => this.props.editor.layout.preview.setActiveGizmo("position")}>
 								位置 <MenubarShortcut>CTRL+T</MenubarShortcut>
 							</MenubarItem>
+							<MenubarItem onClick={() => this.props.editor.layout.preview.setActiveGizmo("position-plane")}>平面移动</MenubarItem>
 							<MenubarItem onClick={() => this.props.editor.layout.preview.setActiveGizmo("rotation")}>
 								旋转 <MenubarShortcut>CTRL+R</MenubarShortcut>
 							</MenubarItem>
+							<MenubarItem onClick={() => this.props.editor.layout.preview.setActiveGizmo("rotation-plane")}>平面旋转</MenubarItem>
 							<MenubarItem onClick={() => this.props.editor.layout.preview.setActiveGizmo("scaling")}>
 								缩放 <MenubarShortcut>CTRL+W</MenubarShortcut>
 							</MenubarItem>

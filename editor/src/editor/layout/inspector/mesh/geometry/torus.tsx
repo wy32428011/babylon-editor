@@ -34,8 +34,8 @@ export function TorusMeshGeometryInspector(props: ITorusMeshGeometryInspectorPro
 
 	return (
 		<EditorInspectorSectionField title="圆环">
-			<EditorInspectorNumberField object={proxy} property="diameter" label="Diameter" step={0.1} min={0} />
-			<EditorInspectorNumberField object={proxy} property="thickness" label="厚度" step={0.1} min={1} />
+			<EditorInspectorNumberField object={proxy} property="diameter" label="直径 (m)" step={0.1} min={0} />
+			<EditorInspectorNumberField object={proxy} property="thickness" label="厚度 (m)" step={0.1} min={1} />
 			<EditorInspectorNumberField object={proxy} property="tessellation" label="Tessellation" step={1} min={2} max={256} />
 		</EditorInspectorSectionField>
 	);

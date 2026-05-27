@@ -1,13 +1,17 @@
 import { Observable } from "babylonjs";
 import { dirname, join } from "path/posix";
 
+import { defaultEditorProjectSpace, IEditorProjectSpace } from "./space";
+
 export interface IProjectConfiguration {
 	path: string | null;
+	space: IEditorProjectSpace;
 	compressedTexturesEnabled: boolean;
 }
 
 export const projectConfiguration: IProjectConfiguration = {
 	path: null,
+	space: defaultEditorProjectSpace,
 	compressedTexturesEnabled: false,
 };
 

@@ -176,7 +176,7 @@ export class EditorSceneInspector extends Component<IEditorInspectorImplementati
 					noUndoRedo
 					object={o}
 					property="gravity"
-					label="重力"
+					label="重力 (m/s²)"
 					onFinishChange={() => {
 						const oldGravity = physicsEngine.gravity.clone();
 
@@ -472,7 +472,7 @@ export class EditorSceneInspector extends Component<IEditorInspectorImplementati
 								<>
 									<EditorInspectorNumberField object={defaultRenderingPipeline} property="bloomThreshold" label="Threshold" />
 									<EditorInspectorNumberField object={defaultRenderingPipeline} property="bloomWeight" label="Weight" />
-									<EditorInspectorNumberField object={defaultRenderingPipeline} property="bloomScale" label="缩放" min={0} max={1} />
+									<EditorInspectorNumberField object={defaultRenderingPipeline} property="bloomScale" label="缩放 (倍)" min={0} max={1} />
 									<EditorInspectorNumberField object={defaultRenderingPipeline} property="bloomKernel" label="Kernal" step={1} min={0} max={512} />
 								</>
 							)}
@@ -555,12 +555,7 @@ export class EditorSceneInspector extends Component<IEditorInspectorImplementati
 						)}
 
 						<EditorInspectorSectionField title="Chromatic Aberration">
-							<EditorInspectorSwitchField
-								object={defaultRenderingPipeline}
-								property="chromaticAberrationEnabled"
-								label="启用"
-								onChange={() => this.forceUpdate()}
-							/>
+							<EditorInspectorSwitchField object={defaultRenderingPipeline} property="chromaticAberrationEnabled" label="启用" onChange={() => this.forceUpdate()} />
 
 							{defaultRenderingPipeline.chromaticAberrationEnabled && (
 								<>

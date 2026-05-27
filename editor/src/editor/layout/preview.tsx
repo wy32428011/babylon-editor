@@ -8,7 +8,7 @@ import { Grid } from "react-loader-spinner";
 
 import { FaCheck } from "react-icons/fa6";
 import { IoIosStats } from "react-icons/io";
-import { LuMove3D, LuRotate3D, LuScale3D } from "react-icons/lu";
+import { LuGrid3X3, LuMove3D, LuRotate3D, LuRotateCwSquare, LuScale3D, LuSquareDashedMousePointer } from "react-icons/lu";
 import { GiArrowCursor, GiTeapot, GiWireframeGlobe } from "react-icons/gi";
 
 import {
@@ -16,12 +16,15 @@ import {
 	AbstractMesh,
 	Animation,
 	Camera,
+	TransformNode,
 	CubicEase,
 	EasingFunction,
 	Engine,
 	GizmoCoordinatesMode,
 	ISceneLoaderAsyncResult,
+	Matrix,
 	Node,
+	Plane,
 	Scene,
 	Vector2,
 	Vector3,
@@ -31,18 +34,23 @@ import {
 	SceneLoaderFlags,
 	EngineView,
 	Sprite,
+	Color3,
 	Color4,
 	BoundingBox,
+	MeshBuilder,
 	SelectionOutlineLayer,
 	ClusteredLightContainer,
 	Tools,
 	_GetAudioEngine,
 } from "babylonjs";
 
+import { GridMaterial } from "babylonjs-materials";
+
 import { SpinnerUIComponent } from "../../ui/spinner";
 
 import { Button } from "../../ui/shadcn/ui/button";
 import { Toggle } from "../../ui/shadcn/ui/toggle";
+import { Switch } from "../../ui/shadcn/ui/switch";
 import { Progress } from "../../ui/shadcn/ui/progress";
 import { Separator } from "../../ui/shadcn/ui/separator";
 import { ToolbarRadioGroup, ToolbarRadioGroupItem } from "../../ui/shadcn/ui/toolbar-radio-group";
@@ -54,8 +62,8 @@ import { Editor } from "../main";
 
 import { isVector3 } from "../../tools/guards/math";
 import { isDomTextInputFocused } from "../../tools/dom";
+import { isNodeLocked, setNodeVisibleInGraph } from "../../tools/node/metadata";
 import { tryGetSafeOpenModeFromLocalStorage } from "../../tools/local-storage";
-import { isNodeLocked } from "../../tools/node/metadata";
 import { registerUndoRedo } from "../../tools/undoredo";
 import { initializeHavok } from "../../tools/physics/init";
 import { initializeRecast } from "../../tools/recast/init";
@@ -89,7 +97,7 @@ import { EditorPreviewCamera } from "./preview/camera";
 import { EditorPreviewAxisHelper } from "./preview/axis";
 import { EditorPreviewPlayComponent } from "./preview/play";
 
-import { EditorPreviewGizmo } from "./preview/gizmo/gizmo";
+import { EditorPreviewGizmo, type EditorPreviewGizmoType } from "./preview/gizmo/gizmo";
 import { EditorPreviewGizmoSettings } from "./preview/gizmo/settings";
 
 import { Stats } from "./preview/stats/stats";
@@ -102,6 +110,29 @@ import { applyMaterialAssetToObject } from "./preview/import/material";
 import { EditorPreviewConvertProgress } from "./preview/import/progress";
 import { loadImportedParticleSystemFile } from "./preview/import/particles";
 import { loadImportedSceneFile, tryConvertSceneFile } from "./preview/import/import";
+
+const IMPORTED_MODEL_TARGET_MAX_DIMENSION = 200;
+const IMPORTED_MODEL_MIN_SCALE_FACTOR = 0.001;
+const IMPORTED_MODEL_MAX_SCALE_FACTOR = 1000;
+const PREVIEW_GRID_NAME = "__editor_preview_placement_grid__";
+const PREVIEW_GRID_RENDER_SIZE = 100000;
+const PREVIEW_GRID_STEP = 10;
+const PREVIEW_GRID_MAJOR_STEP = 100;
+const PREVIEW_GRID_Y_OFFSET = 0.01;
+
+type ImportedModelRoot = AbstractMesh | TransformNode;
+type CanvasPickEvent = Pick<MouseEvent<HTMLCanvasElement, globalThis.MouseEvent>, "currentTarget" | "clientX" | "clientY"> & {
+	nativeEvent: Pick<globalThis.MouseEvent, "offsetX" | "offsetY">;
+};
+
+interface IImportedModelFitBounds {
+	minimum: Vector3;
+	maximum: Vector3;
+	center: Vector3;
+	size: Vector3;
+	maxDimension: number;
+	bottomCenter: Vector3;
+}
 
 export interface IEditorPreviewProps {
 	/**
@@ -121,13 +152,15 @@ export interface IEditorPreviewState {
 	pickingEnabled: boolean;
 
 	showStatsValues: boolean;
+	showSceneHelperIcons: boolean;
+	showPlacementGrid: boolean;
 	statsValues?: StatsValuesType;
 
 	playEnabled: boolean;
 	playSceneLoadingProgress: number;
 
 	gizmoSnap: IGizmoSnapPreferences;
-	activeGizmo: "position" | "rotation" | "scaling" | "none";
+	activeGizmo: EditorPreviewGizmoType;
 
 	/**
 	 * Defines the fixed dimensions of the preview canvas.
@@ -198,6 +231,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 
 	private _lastPickedDecal: AbstractMesh | null = null;
 	private _objectUnderPointer: AbstractMesh | Sprite | null = null;
+	private _placementGrid: AbstractMesh | null = null;
 
 	private _workingCanvas: HTMLCanvasElement | null = null;
 	private _mainView: EngineView | null = null;
@@ -216,6 +250,8 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			fixedDimensions: "fit",
 
 			showStatsValues: false,
+			showSceneHelperIcons: false,
+			showPlacementGrid: true,
 
 			playEnabled: false,
 			playSceneLoadingProgress: 0,
@@ -253,7 +289,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 							onDoubleClick={(ev) => this._handleDoubleClick(ev)}
 							onMouseLeave={() => this._handleMouseLeave()}
 							onDragLeave={() => this._handleMouseLeave()}
-							onMouseMove={() => this._handleMouseMove(this.scene.pointerX, this.scene.pointerY)}
+							onMouseMove={(ev) => this._handleMouseMove(ev)}
 							className={`
                                 select-none outline-none w-full h-full object-contain
                                 ${this.state.fixedDimensions !== "fit" ? "bg-black" : "bg-background"}
@@ -350,6 +386,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		this.scene = null!;
 		this.engine = null!;
 
+		this._placementGrid = null;
 		this._previewCamera = null;
 
 		return this._onGotCanvasRef(this.canvas);
@@ -395,6 +432,27 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 					this.engine.setSize(3840, 2160);
 				};
 				break;
+		}
+	}
+
+	/**
+	 * 临时隐藏预览辅助网格执行异步任务，避免项目缩略图等输出带上编辑器辅助线。
+	 */
+	public async withPlacementGridHidden<T>(callback: () => Promise<T>): Promise<T> {
+		const grid = this._placementGrid;
+		const restoreGrid = Boolean(grid && !grid.isDisposed() && grid.isEnabled());
+
+		if (restoreGrid) {
+			grid?.setEnabled(false);
+		}
+
+		try {
+			return await callback();
+		} finally {
+			if (restoreGrid && grid && !grid.isDisposed()) {
+				grid.setEnabled(true);
+				this._syncPlacementGridToCamera();
+			}
 		}
 	}
 
@@ -527,6 +585,113 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	}
 
 	/**
+	 * 识别或创建本次导入模型的整体根节点，后续自动缩放、落点和 Gizmo 都围绕它处理。
+	 */
+	private _getImportedModelRoot(result: ISceneLoaderAsyncResult, absolutePath: string, sidecarRoot: ImportedModelRoot | null): ImportedModelRoot | null {
+		if (sidecarRoot) {
+			return sidecarRoot;
+		}
+
+		const ignoredNodes = [this.camera as unknown as Node, this._previewCamera as Node | null];
+		const importedNodes = [...result.transformNodes, ...result.meshes].filter((node) => !ignoredNodes.includes(node));
+		const rootNode = importedNodes.find((node) => (node.name === "__root__" || node.id === "__root__") && !node.parent);
+		if (isAnyTransformNode(rootNode) || isAbstractMesh(rootNode)) {
+			return rootNode;
+		}
+
+		const topLevelNodes = importedNodes.filter((node) => !node.parent && (isAnyTransformNode(node) || isAbstractMesh(node))) as ImportedModelRoot[];
+		if (topLevelNodes.length === 1) {
+			return topLevelNodes[0];
+		}
+
+		if (!topLevelNodes.length) {
+			return null;
+		}
+
+		const root = new TransformNode(basename(absolutePath, extname(absolutePath)), this.scene);
+		topLevelNodes.forEach((node) => (node.parent = root));
+
+		return root;
+	}
+
+	/**
+	 * 计算导入模型层级的世界包围盒，返回缩放和底部落点所需的派生尺寸。
+	 */
+	private _getImportedModelFitBounds(root: ImportedModelRoot): IImportedModelFitBounds | null {
+		root.computeWorldMatrix(true);
+
+		let minimum: Vector3 | null = null;
+		let maximum: Vector3 | null = null;
+
+		const meshes = isAbstractMesh(root) ? [root, ...root.getChildMeshes(false)] : root.getChildMeshes(false);
+		meshes.forEach((mesh) => {
+			if (mesh.getTotalVertices() <= 0) {
+				return;
+			}
+
+			mesh.computeWorldMatrix(true);
+			mesh.refreshBoundingInfo({
+				applyMorph: true,
+				applySkeleton: true,
+				updatePositionsArray: true,
+			});
+
+			const box = mesh.getBoundingInfo().boundingBox;
+			minimum = minimum ? Vector3.Minimize(minimum, box.minimumWorld) : box.minimumWorld.clone();
+			maximum = maximum ? Vector3.Maximize(maximum, box.maximumWorld) : box.maximumWorld.clone();
+		});
+
+		if (!minimum || !maximum) {
+			return null;
+		}
+
+		const boundsMinimum = minimum as Vector3;
+		const boundsMaximum = maximum as Vector3;
+		const center = Vector3.Center(boundsMinimum, boundsMaximum);
+		const size = boundsMaximum.subtract(boundsMinimum);
+
+		return {
+			minimum: boundsMinimum,
+			maximum: boundsMaximum,
+			center,
+			size,
+			maxDimension: Math.max(size.x, size.y, size.z),
+			bottomCenter: new Vector3(center.x, boundsMinimum.y, center.z),
+		};
+	}
+
+	/**
+	 * 自动把导入模型缩放到编辑器可操作尺寸，并把底部中心对齐到鼠标命中的世界坐标。
+	 */
+	private _fitImportedModelToDropPoint(root: ImportedModelRoot, position?: Vector3): void {
+		const bounds = this._getImportedModelFitBounds(root);
+		if (bounds?.maxDimension && Number.isFinite(bounds.maxDimension) && bounds.maxDimension > 0) {
+			const scaleFactor = Math.min(
+				IMPORTED_MODEL_MAX_SCALE_FACTOR,
+				Math.max(IMPORTED_MODEL_MIN_SCALE_FACTOR, IMPORTED_MODEL_TARGET_MAX_DIMENSION / bounds.maxDimension)
+			);
+
+			root.scaling.scaleInPlace(scaleFactor);
+			root.computeWorldMatrix(true);
+		}
+
+		if (!position) {
+			return;
+		}
+
+		const scaledBounds = this._getImportedModelFitBounds(root);
+		if (!scaledBounds) {
+			root.setAbsolutePosition(position);
+			root.computeWorldMatrix(true);
+			return;
+		}
+
+		const delta = position.subtract(scaledBounds.bottomCenter);
+		root.setAbsolutePosition(root.getAbsolutePosition().add(delta));
+		root.computeWorldMatrix(true);
+	}
+
+	/**
 	 * Sets the given camera active as a preview.
 	 * This helps to visualize what the selected camera sees when being manipulated
 	 * using gizmos for example.
@@ -549,7 +714,9 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 
 		waitNextAnimationFrame().then(() => {
 			this.icons = ref;
-			this.icons?.start();
+			if (this.state.showSceneHelperIcons) {
+				this.icons?.start();
+			}
 		});
 	}
 
@@ -633,6 +800,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 					}
 				}
 
+				this._syncPlacementGridToCamera();
 				this.scene.render();
 
 				if (!this.engine.activeView?.camera) {
@@ -660,7 +828,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			mode: EasingFunction.EASINGMODE_EASEINOUT,
 		};
 
-		this.scene.enablePhysics(new Vector3(0, -981, 0), new HavokPlugin());
+		this.scene.enablePhysics(new Vector3(0, -9.81, 0), new HavokPlugin());
 
 		this.statistics = new Stats(this.props.editor);
 		this.statistics.onValuesChangedObservable.add((values) => {
@@ -672,9 +840,117 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		});
 
 		this.axis?.start();
-		this.icons?.start();
+		this._setPlacementGridVisible(this.state.showPlacementGrid);
+		if (this.state.showSceneHelperIcons) {
+			this.icons?.start();
+		}
 
 		this.forceUpdate();
+	}
+
+	/**
+	 * 创建用于摆放模型的运行时辅助网格。该网格不保存、不进层级图，也不参与拾取。
+	 */
+	private _createPlacementGrid(): AbstractMesh | null {
+		if (!this.scene || (this._placementGrid && !this._placementGrid.isDisposed())) {
+			return this._placementGrid;
+		}
+
+		const grid = MeshBuilder.CreateGround(
+			PREVIEW_GRID_NAME,
+			{
+				width: PREVIEW_GRID_RENDER_SIZE,
+				height: PREVIEW_GRID_RENDER_SIZE,
+				subdivisions: 1,
+			},
+			this.scene
+		);
+		const material = new GridMaterial(`${PREVIEW_GRID_NAME}_material`, this.scene);
+
+		material.gridRatio = PREVIEW_GRID_STEP;
+		material.majorUnitFrequency = PREVIEW_GRID_MAJOR_STEP / PREVIEW_GRID_STEP;
+		material.minorUnitVisibility = 0.28;
+		material.opacity = 0.38;
+		material.mainColor = new Color3(0.48, 0.48, 0.48);
+		material.lineColor = new Color3(0.72, 0.72, 0.72);
+		material.backFaceCulling = false;
+		material.doNotSerialize = true;
+		material.metadata = {
+			...material.metadata,
+			doNotSerialize: true,
+			editorPreviewGrid: true,
+		};
+
+		grid.id = PREVIEW_GRID_NAME;
+		grid.material = material;
+		grid.isPickable = false;
+		grid.alwaysSelectAsActiveMesh = true;
+		grid.doNotSerialize = true;
+		grid.metadata = {
+			...grid.metadata,
+			doNotSerialize: true,
+			editorPreviewGrid: true,
+		};
+		setNodeVisibleInGraph(grid, false);
+		grid._removeFromSceneRootNodes();
+
+		this._placementGrid = grid;
+		this._syncPlacementGridToCamera();
+		return grid;
+	}
+
+	/**
+	 * 将超大网格跟随当前视口中心移动，并用材质偏移保持网格线仍对齐世界坐标。
+	 */
+	private _syncPlacementGridToCamera(): void {
+		if (!this.scene || !this._placementGrid || this._placementGrid.isDisposed() || !this._placementGrid.isEnabled()) {
+			return;
+		}
+
+		const camera = this.scene.activeCamera;
+		if (!camera) {
+			return;
+		}
+
+		const cameraTarget = (camera as Camera & { target?: unknown }).target;
+		const center = isVector3(cameraTarget) ? cameraTarget : camera.position;
+		const x = Math.round(center.x / PREVIEW_GRID_STEP) * PREVIEW_GRID_STEP;
+		const z = Math.round(center.z / PREVIEW_GRID_STEP) * PREVIEW_GRID_STEP;
+
+		if (this._placementGrid.position.x !== x || this._placementGrid.position.y !== PREVIEW_GRID_Y_OFFSET || this._placementGrid.position.z !== z) {
+			this._placementGrid.position.set(x, PREVIEW_GRID_Y_OFFSET, z);
+		}
+
+		const material = this._placementGrid.material;
+		if (material instanceof GridMaterial && (material.gridOffset.x !== x || material.gridOffset.y !== 0 || material.gridOffset.z !== z)) {
+			material.gridOffset.set(x, 0, z);
+		}
+	}
+
+	/**
+	 * 设置预览辅助网格显隐，隐藏时保留对象以便快速再次显示。
+	 */
+	private _setPlacementGridVisible(visible: boolean): void {
+		const grid = visible ? this._createPlacementGrid() : this._placementGrid;
+		if (grid) {
+			grid.setEnabled(visible);
+			this._syncPlacementGridToCamera();
+		}
+
+		this.setState({ showPlacementGrid: visible });
+	}
+
+	/**
+	 * 设置是否显示场景中的灯光、相机等辅助图标。
+	 */
+	private _setSceneHelperIconsVisible(visible: boolean): void {
+		if (visible) {
+			this.icons?.start();
+		} else {
+			this.icons?.stop();
+		}
+
+		this.setState({ showSceneHelperIcons: visible });
 	}
 
 	private async _createWebgpuEngine(canvas: HTMLCanvasElement, safeOpenMode: boolean): Promise<WebGPUEngine> {
@@ -712,14 +988,14 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 
 	private _mouseMoveTimeoutId: number = -1;
 
-	private _handleMouseMove(x: number, y: number): void {
+	private _handleMouseMove(event: MouseEvent<HTMLCanvasElement, globalThis.MouseEvent>): void {
 		this.lastPickingInfo = null;
 
 		if (!this.state.pickingEnabled) {
 			return;
 		}
 
-		const pickingInfo = this._getPickingInfo(x, y);
+		const pickingInfo = this._getPickingInfoForEvent(event);
 		const pickedObject = pickingInfo.pickedSprite ?? pickingInfo.pickedMesh?._masterMesh ?? pickingInfo.pickedMesh;
 
 		if (!pickedObject || (isNode(pickedObject) && isNodeLocked(pickedObject))) {
@@ -754,29 +1030,40 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		this._mouseDownPosition.set(event.clientX, event.clientY);
 
 		if (event.button === 2) {
-			this.setState({
-				rightClickedObject: this._objectUnderPointer,
-			});
+			const pickingInfo = this._getPickingInfoForEvent(event);
+			const rightClickedObject = this._getEffectivePickedObject(pickingInfo);
+
+			if (rightClickedObject) {
+				this.setState({
+					rightClickedObject,
+				});
+			} else {
+				this._resetPointerContextInfo();
+			}
+
+			this._restoreCurrentMeshUnderPointer();
+			this._objectUnderPointer = null;
+
+			if (rightClickedObject) {
+				this.scene.activeCamera?.inputs.detachElement();
+				this._handleMouseUp(event);
+			}
+
+			return;
 		}
 
 		this._restoreCurrentMeshUnderPointer();
-
-		if (event.button === 2 && this._objectUnderPointer) {
-			this.scene.activeCamera?.inputs.detachElement();
-			this._handleMouseUp(event);
-		}
-
 		this._objectUnderPointer = null;
 	}
 
-	private _handleDoubleClick(_event: MouseEvent<HTMLCanvasElement, globalThis.MouseEvent>): void {
+	private _handleDoubleClick(event: MouseEvent<HTMLCanvasElement, globalThis.MouseEvent>): void {
 		this.lastPickingInfo = null;
 
 		if (!this.state.pickingEnabled || this.axis._axisMeshUnderPointer) {
 			return;
 		}
 
-		const pickingInfo = this._getPickingInfo(this.scene.pointerX, this.scene.pointerY);
+		const pickingInfo = this._getPickingInfoForEvent(event);
 		if (pickingInfo.pickedMesh || pickingInfo.pickedSprite) {
 			this.focusObject(pickingInfo.pickedMesh ?? pickingInfo.pickedSprite);
 		}
@@ -808,19 +1095,9 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			}
 		});
 
-		const pickingInfo = this._getPickingInfo(this.scene.pointerX, this.scene.pointerY);
+		const pickingInfo = this._getPickingInfoForEvent(event);
 
-		let effectivePickedObject = (pickingInfo.pickedSprite ?? pickingInfo.pickedMesh?._masterMesh ?? pickingInfo.pickedMesh) as Node;
-		if (effectivePickedObject && isNode(effectivePickedObject) && !isNodeLocked(effectivePickedObject)) {
-			const sceneLink = getRootSceneLink(effectivePickedObject);
-			if (sceneLink) {
-				effectivePickedObject = sceneLink;
-			}
-
-			if (effectivePickedObject.parent && isSpriteMapNode(effectivePickedObject.parent) && effectivePickedObject.parent.outputPlane === effectivePickedObject) {
-				effectivePickedObject = effectivePickedObject.parent;
-			}
-		}
+		const effectivePickedObject = this._getEffectivePickedObject(pickingInfo);
 
 		this.lastPickingInfo = pickingInfo;
 
@@ -850,7 +1127,113 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	}
 
 	private _meshPredicate(m: AbstractMesh): boolean {
-		return !m._masterMesh && !isCollisionMesh(m) && !isCollisionInstancedMesh(m) && m.isVisible && m.isEnabled();
+		return !m.metadata?.editorPreviewGrid && !m._masterMesh && !isCollisionMesh(m) && !isCollisionInstancedMesh(m) && m.isVisible && m.isEnabled();
+	}
+
+	/**
+	 * 把鼠标事件转换为 Babylon scene.pick 使用的坐标，并扣除固定分辨率 object-contain 产生的黑边。
+	 */
+	private _getCanvasPickCoordinates(ev: CanvasPickEvent): Vector2 | null {
+		const target = ev.currentTarget;
+		const rect = target.getBoundingClientRect();
+		if (rect.width <= 0 || rect.height <= 0) {
+			return new Vector2(ev.nativeEvent.offsetX, ev.nativeEvent.offsetY);
+		}
+
+		const localX = ev.clientX - rect.left;
+		const localY = ev.clientY - rect.top;
+		const renderWidth = this.engine?.getRenderWidth();
+		const renderHeight = this.engine?.getRenderHeight();
+		const hardwareScalingLevel = this.engine?.getHardwareScalingLevel() ?? 1;
+
+		if (!renderWidth || !renderHeight || renderWidth <= 0 || renderHeight <= 0 || hardwareScalingLevel <= 0) {
+			return new Vector2(localX, localY);
+		}
+
+		const renderAspectRatio = renderWidth / renderHeight;
+		const rectAspectRatio = rect.width / rect.height;
+		let contentWidth = rect.width;
+		let contentHeight = rect.height;
+		let contentLeft = 0;
+		let contentTop = 0;
+
+		if (rectAspectRatio > renderAspectRatio) {
+			contentWidth = rect.height * renderAspectRatio;
+			contentLeft = (rect.width - contentWidth) / 2;
+		} else if (rectAspectRatio < renderAspectRatio) {
+			contentHeight = rect.width / renderAspectRatio;
+			contentTop = (rect.height - contentHeight) / 2;
+		}
+
+		const contentX = localX - contentLeft;
+		const contentY = localY - contentTop;
+		const edgeTolerance = 0.5;
+		if (contentX < -edgeTolerance || contentY < -edgeTolerance || contentX > contentWidth + edgeTolerance || contentY > contentHeight + edgeTolerance) {
+			return null;
+		}
+
+		const clampedContentX = Math.min(Math.max(contentX, 0), contentWidth);
+		const clampedContentY = Math.min(Math.max(contentY, 0), contentHeight);
+		const renderX = (clampedContentX / contentWidth) * renderWidth;
+		const renderY = (clampedContentY / contentHeight) * renderHeight;
+
+		// Babylon 创建 picking ray 时会再除以硬件缩放，这里乘回去才能保持事件坐标与渲染缓冲一致。
+		return new Vector2(renderX * hardwareScalingLevel, renderY * hardwareScalingLevel);
+	}
+
+	/**
+	 * 把拖放事件转换为 Babylon scene.pick 使用的 canvas 相对坐标。
+	 */
+	private _getDragPickCoordinates(ev: React.DragEvent<HTMLCanvasElement>): Vector2 | null {
+		return this._getCanvasPickCoordinates(ev);
+	}
+
+	private _getDropPickingInfoAt(coordinates: Vector2 | null): PickingInfo {
+		if (!coordinates) {
+			return new PickingInfo();
+		}
+
+		return this.scene.pick(coordinates.x, coordinates.y, (m) => this._meshPredicate(m), false);
+	}
+
+	/**
+	 * 计算拖放落点。优先使用真实模型命中点；空白区域则投射到 XZ 水平面，保证拖到网格时也能得到稳定位置。
+	 */
+	private _getDropPointAt(coordinates: Vector2 | null): Vector3 | null {
+		if (!coordinates) {
+			return null;
+		}
+
+		const pickedPoint = this._getDropPickingInfoAt(coordinates).pickedPoint?.clone();
+		if (pickedPoint) {
+			return pickedPoint;
+		}
+
+		const camera = this.scene.activeCamera;
+		if (!camera) {
+			return null;
+		}
+
+		const ray = this.scene.createPickingRay(coordinates.x, coordinates.y, Matrix.Identity(), camera);
+		const distance = ray.intersectsPlane(new Plane(0, 1, 0, 0));
+		if (distance === null) {
+			return null;
+		}
+
+		return ray.origin.add(ray.direction.scale(distance));
+	}
+
+	private _getDropPoint(ev: React.DragEvent<HTMLCanvasElement>): Vector3 | null {
+		return this._getDropPointAt(this._getDragPickCoordinates(ev));
+	}
+
+	private _getPickingInfoForEvent(event: CanvasPickEvent): PickingInfo {
+		const coordinates = this._getCanvasPickCoordinates(event);
+		if (!coordinates) {
+			return new PickingInfo();
+		}
+
+		return this._getPickingInfo(coordinates.x, coordinates.y);
 	}
 
 	private _getPickingInfo(x: number, y: number): PickingInfo {
@@ -885,6 +1268,33 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		}
 
 		return pickingInfo;
+	}
+
+	private _getEffectivePickedObject(pickingInfo: PickingInfo): Node | Sprite | null {
+		const pickedObject = pickingInfo.pickedSprite ?? pickingInfo.pickedMesh?._masterMesh ?? pickingInfo.pickedMesh;
+		if (!pickedObject) {
+			return null;
+		}
+
+		if (isSprite(pickedObject)) {
+			return pickedObject;
+		}
+
+		if (!isNode(pickedObject) || isNodeLocked(pickedObject)) {
+			return null;
+		}
+
+		let effectivePickedObject: Node = pickedObject;
+		const sceneLink = getRootSceneLink(effectivePickedObject);
+		if (sceneLink) {
+			effectivePickedObject = sceneLink;
+		}
+
+		if (effectivePickedObject.parent && isSpriteMapNode(effectivePickedObject.parent) && effectivePickedObject.parent.outputPlane === effectivePickedObject) {
+			effectivePickedObject = effectivePickedObject.parent;
+		}
+
+		return effectivePickedObject;
 	}
 
 	private _resetPointerContextInfo(): void {
@@ -975,7 +1385,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 							if (value === "select") {
 								this.setActiveGizmo("none");
 							} else {
-								this.setActiveGizmo(value as "position" | "rotation" | "scaling");
+								this.setActiveGizmo(value as EditorPreviewGizmoType);
 							}
 						}}
 					>
@@ -997,11 +1407,27 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 						</Tooltip>
 						<Tooltip>
 							<TooltipTrigger asChild>
+								<ToolbarRadioGroupItem value="position-plane" className={this.state.activeGizmo === "position-plane" ? "bg-primary/20" : ""}>
+									<LuSquareDashedMousePointer height={16} />
+								</ToolbarRadioGroupItem>
+							</TooltipTrigger>
+							<TooltipContent>切换平面移动 Gizmo</TooltipContent>
+						</Tooltip>
+						<Tooltip>
+							<TooltipTrigger asChild>
 								<ToolbarRadioGroupItem value="rotation" className={this.state.activeGizmo === "rotation" ? "bg-primary/20" : ""}>
 									<LuRotate3D height={16} />
 								</ToolbarRadioGroupItem>
 							</TooltipTrigger>
 							<TooltipContent>切换旋转 Gizmo</TooltipContent>
+						</Tooltip>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<ToolbarRadioGroupItem value="rotation-plane" className={this.state.activeGizmo === "rotation-plane" ? "bg-primary/20" : ""}>
+									<LuRotateCwSquare height={16} />
+								</ToolbarRadioGroupItem>
+							</TooltipTrigger>
+							<TooltipContent>切换平面旋转 Gizmo</TooltipContent>
 						</Tooltip>
 						<Tooltip>
 							<TooltipTrigger asChild>
@@ -1018,6 +1444,19 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 					<EditorPreviewGizmoSettings editor={this.props.editor} />
 
 					<Separator orientation="vertical" className="mx-1 h-[24px]" />
+
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Toggle
+								className={this.state.showPlacementGrid ? "!px-2 !py-2 bg-primary/20" : "!px-2 !py-2"}
+								pressed={this.state.showPlacementGrid}
+								onPressedChange={(pressed) => this._setPlacementGridVisible(pressed)}
+							>
+								<LuGrid3X3 className="w-5 h-5" strokeWidth={2} />
+							</Toggle>
+						</TooltipTrigger>
+						<TooltipContent>显示/隐藏网格</TooltipContent>
+					</Tooltip>
 
 					<Tooltip>
 						<TooltipTrigger asChild>
@@ -1067,8 +1506,13 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 							<DropdownMenuItem className="flex gap-2 items-center" onClick={() => (this.axis.enabled ? this.axis.stop() : this.axis.start())}>
 								{this.axis?.enabled && <FaCheck className="w-4 h-4" />} Axis Helper
 							</DropdownMenuItem>
-							<DropdownMenuItem className="flex gap-2 items-center" onClick={() => (this.icons.enabled ? this.icons.stop() : this.icons.start())}>
-								{this.icons?.enabled && <FaCheck className="w-4 h-4" />} Icons Helper
+							<DropdownMenuItem className="flex gap-3 items-center justify-between" onClick={() => this._setSceneHelperIconsVisible(!this.state.showSceneHelperIcons)}>
+								<span>显示灯光/相机图标</span>
+								<Switch
+									checked={this.state.showSceneHelperIcons}
+									onClick={(ev) => ev.stopPropagation()}
+									onCheckedChange={(checked) => this._setSceneHelperIconsVisible(checked)}
+								/>
 							</DropdownMenuItem>
 							<DropdownMenuSeparator />
 							<DropdownMenuItem className="flex gap-2 items-center" onClick={() => (this.scene.postProcessesEnabled = !this.scene.postProcessesEnabled)}>
@@ -1223,7 +1667,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	 * Sets the currently active gizmo. Set "none" to deactivate the gizmo.
 	 * @param gizmo defines the type of gizmo to activate.
 	 */
-	public setActiveGizmo(gizmo: "position" | "rotation" | "scaling" | "none"): void {
+	public setActiveGizmo(gizmo: EditorPreviewGizmoType): void {
 		if (this.state.activeGizmo === gizmo) {
 			gizmo = "none";
 		}
@@ -1291,14 +1735,11 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	}
 
 	private _handleGraphNodesDropped(ev: React.DragEvent<HTMLCanvasElement>): void {
-		const pick = this.scene.pick(ev.nativeEvent.offsetX, ev.nativeEvent.offsetY, (m) => !m._masterMesh && !isCollisionMesh(m) && !isCollisionInstancedMesh(m), false);
-		const mesh = pick.pickedMesh?._masterMesh ?? pick.pickedMesh;
+		const pickedPoint = this._getDropPoint(ev);
 
-		if (!mesh || !pick.pickedPoint) {
+		if (!pickedPoint) {
 			return;
 		}
-
-		const pickedPoint = pick.pickedPoint.clone();
 
 		const nodesToMove = this.props.editor.layout.graph.getSelectedNodes();
 		const oldPositionsMap = new Map<unknown, Vector3>();
@@ -1344,7 +1785,10 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			return;
 		}
 
-		const pick = this.scene.pick(ev.nativeEvent.offsetX, ev.nativeEvent.offsetY, (m) => !m._masterMesh && !isCollisionMesh(m) && !isCollisionInstancedMesh(m), false);
+		const pickedPoint = this._getDropPoint(ev);
+		if (!pickedPoint) {
+			return;
+		}
 
 		const sprite = new Sprite(`sprite-${spriteNode.spriteManager.sprites.length}`, spriteNode.spriteManager);
 		sprite.size = 100;
@@ -1359,9 +1803,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			sprite.cellIndex = data.cellIndex;
 		}
 
-		if (pick.pickedPoint) {
-			sprite.position.copyFrom(pick.pickedPoint);
-		}
+		sprite.position.copyFrom(pickedPoint);
 
 		this.gizmo.setAttachedObject(sprite);
 		this.props.editor.layout.graph.refresh();
@@ -1369,12 +1811,14 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 
 	private _handleAssetsDropped(ev: React.DragEvent<HTMLCanvasElement>): void {
 		const absolutePaths = this.props.editor.layout.assets.state.selectedKeys;
+		const dropCoordinates = this._getDragPickCoordinates(ev);
+		const dropPoint = this._getDropPointAt(dropCoordinates);
+		const dropPick = this._getDropPickingInfoAt(dropCoordinates);
+		const dropMesh = dropPick.pickedMesh?._masterMesh ?? dropPick.pickedMesh;
+		const useCloudConverter = ev.shiftKey;
 
 		absolutePaths.forEach(async (absolutePath) => {
 			await waitNextAnimationFrame();
-
-			const pick = this.scene.pick(ev.nativeEvent.offsetX, ev.nativeEvent.offsetY, (m) => !m._masterMesh && !isCollisionMesh(m) && !isCollisionInstancedMesh(m), false);
-			const mesh = pick.pickedMesh?._masterMesh ?? pick.pickedMesh;
 
 			const extension = extname(absolutePath).toLowerCase();
 			switch (extension) {
@@ -1392,7 +1836,11 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 				case ".ms3d":
 				case ".blend":
 				case ".babylon":
-					await this._importModelAsset(absolutePath, ev.shiftKey, pick.pickedPoint?.clone());
+					if (!dropPoint) {
+						return;
+					}
+
+					await this._importModelAsset(absolutePath, useCloudConverter, dropPoint?.clone());
 					break;
 
 				case ".env":
@@ -1401,20 +1849,21 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 				case ".webp":
 				case ".bmp":
 				case ".jpeg":
-					applyTextureAssetToObject(this.props.editor, mesh ?? this.scene, absolutePath);
+					applyTextureAssetToObject(this.props.editor, dropMesh ?? this.scene, absolutePath);
 					break;
 
 				case ".material":
-					applyMaterialAssetToObject(this.props.editor, mesh, absolutePath);
+					applyMaterialAssetToObject(this.props.editor, dropMesh, absolutePath);
 					break;
 
 				case ".scene":
+					if (!dropPoint) {
+						return;
+					}
+
 					createSceneLink(this.props.editor, absolutePath).then((node) => {
 						this.setRenderScene(true);
-
-						if (pick.pickedPoint) {
-							node?.position.addInPlace(pick.pickedPoint);
-						}
+						node?.position.addInPlace(dropPoint);
 					});
 					break;
 
@@ -1430,14 +1879,14 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 				case ".ogg":
 				case ".wav":
 				case ".wave":
-					applySoundAsset(this.props.editor, mesh ?? this.scene, absolutePath).then(() => {
+					applySoundAsset(this.props.editor, dropMesh ?? this.scene, absolutePath).then(() => {
 						this.props.editor.layout.graph.refresh();
 					});
 					break;
 
 				case ".npss":
-					if (mesh) {
-						loadImportedParticleSystemFile(this.props.editor.layout.preview.scene, mesh, absolutePath).then(() => {
+					if (dropMesh) {
+						loadImportedParticleSystemFile(this.props.editor.layout.preview.scene, dropMesh, absolutePath).then(() => {
 							this.props.editor.layout.graph.refresh();
 						});
 					}
@@ -1462,8 +1911,10 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			return;
 		}
 
-		const pick = this.scene.pick(ev.nativeEvent.offsetX, ev.nativeEvent.offsetY, (m) => !m._masterMesh && !isCollisionMesh(m) && !isCollisionInstancedMesh(m), false);
-		const pickedPoint = pick.pickedPoint?.clone();
+		const pickedPoint = this._getDropPoint(ev);
+		if (!pickedPoint) {
+			return;
+		}
 
 		for (const modelFile of modelFiles) {
 			try {
@@ -1489,23 +1940,42 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 
 		const sidecar = await discoverModelSidecar(this.props.editor.state.projectPath, absolutePath);
 		const sidecarRoot = sidecar ? applyModelSidecarToImport(this.scene, result, sidecar) : null;
+		const autoFitImportedModel = [".glb", ".gltf"].includes(extname(absolutePath).toLowerCase());
 
-		if (position) {
-			if (sidecarRoot) {
-				sidecarRoot.position.addInPlace(position);
-			} else {
-				result.meshes.forEach((m) => !m.parent && m.position.addInPlace(position));
-				result.transformNodes.forEach((t) => !t.parent && t.position.addInPlace(position));
+		if (!autoFitImportedModel) {
+			if (position) {
+				if (sidecarRoot) {
+					sidecarRoot.position.addInPlace(position);
+				} else {
+					result.meshes.forEach((m) => !m.parent && m.position.addInPlace(position));
+					result.transformNodes.forEach((t) => !t.parent && t.position.addInPlace(position));
+				}
 			}
+
+			if (sidecarRoot) {
+				this.gizmo.setAttachedObject(sidecarRoot);
+				this.props.editor.layout.graph.setSelectedNode(sidecarRoot);
+				this.props.editor.layout.inspector.setEditedObject(sidecarRoot);
+				this.props.editor.layout.graph.refresh();
+				await waitNextAnimationFrame();
+				this.focusObject(sidecarRoot);
+			}
+
+			return;
 		}
 
-		if (sidecarRoot) {
-			this.gizmo.setAttachedObject(sidecarRoot);
-			this.props.editor.layout.graph.setSelectedNode(sidecarRoot);
-			this.props.editor.layout.inspector.setEditedObject(sidecarRoot);
-			this.props.editor.layout.graph.refresh();
-			await waitNextAnimationFrame();
-			this.focusObject(sidecarRoot);
+		const root = this._getImportedModelRoot(result, absolutePath, sidecarRoot);
+		if (!root) {
+			return;
 		}
+
+		this._fitImportedModelToDropPoint(root, position);
+		this.gizmo.setAttachedObject(root);
+		this.props.editor.layout.graph.setSelectedNode(root);
+		this.props.editor.layout.inspector.setEditedObject(root);
+		this.props.editor.layout.animations.setEditedObject(root);
+		this.props.editor.layout.graph.refresh();
+		await waitNextAnimationFrame();
+		this.focusObject(root);
 	}
 }

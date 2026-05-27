@@ -1,5 +1,7 @@
 import { IGizmoSnapPreferences } from "../tools/scene/gizmo";
 
+import { IEditorProjectSpace } from "./space";
+
 export interface IEditorProject {
 	/**
 	 * The version of the editor that saved this project.
@@ -14,6 +16,11 @@ export interface IEditorProject {
 	 * The plugins of the project.
 	 */
 	plugins: IEditorProjectPlugin[];
+
+	/**
+	 * The real-world unit convention used by scene coordinates.
+	 */
+	space?: IEditorProjectSpace;
 
 	/**
 	 * If the compressed textures are enabled using PVRTexTool.

@@ -329,7 +329,7 @@ export class EditorPreviewPlayComponent extends Component<IEditorPreviewPlayComp
 		this._requireCompiledScripts();
 
 		const scene = new Scene(this.props.editor.layout.preview.engine);
-		scene.enablePhysics(new Vector3(0, -981, 0), new HavokPlugin());
+		scene.enablePhysics(new Vector3(0, -9.81, 0), new HavokPlugin());
 
 		this.scene = scene;
 

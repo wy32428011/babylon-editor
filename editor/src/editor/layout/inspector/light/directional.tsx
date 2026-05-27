@@ -50,7 +50,7 @@ export class EditorDirectionalLightInspector extends Component<IEditorInspectorI
 
 				<EditorInspectorSectionField title="变换">
 					<EditorInspectorVectorField
-						label={<div className="w-14">位置</div>}
+						label={<div className="w-20">位置 (m)</div>}
 						object={this.props.object}
 						property="position"
 						onChange={() => {

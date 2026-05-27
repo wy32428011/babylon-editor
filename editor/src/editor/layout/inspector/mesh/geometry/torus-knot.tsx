@@ -35,8 +35,8 @@ export function TorusKnotMeshGeometryInspector(props: ITorusKnotMeshGeometryInsp
 
 	return (
 		<EditorInspectorSectionField title="环面结">
-			<EditorInspectorNumberField object={proxy} property="radius" label="半径" step={0.1} min={0} />
-			<EditorInspectorNumberField object={proxy} property="tube" label="Tube" step={0.1} min={1} />
+			<EditorInspectorNumberField object={proxy} property="radius" label="半径 (m)" step={0.1} min={0} />
+			<EditorInspectorNumberField object={proxy} property="tube" label="管径 (m)" step={0.1} min={1} />
 			<EditorInspectorNumberField object={proxy} property="radialSegments" label="Radial Segments" step={1} min={2} max={256} />
 			<EditorInspectorNumberField object={proxy} property="tubularSegments" label="Tubular Segments" step={1} min={2} max={256} />
 		</EditorInspectorSectionField>

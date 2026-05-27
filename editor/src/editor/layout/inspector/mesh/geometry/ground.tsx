@@ -185,8 +185,8 @@ export function GroundMeshGeometryInspector(props: IGroundMeshGeometryInspectorP
 
 	return (
 		<EditorInspectorSectionField title="地面">
-			<EditorInspectorNumberField object={proxy} property="width" label="宽度" step={0.1} />
-			<EditorInspectorNumberField object={proxy} property="height" label="高度" step={0.1} />
+			<EditorInspectorNumberField object={proxy} property="width" label="宽度 (m)" step={0.1} />
+			<EditorInspectorNumberField object={proxy} property="height" label="高度 (m)" step={0.1} />
 			<EditorInspectorNumberField object={proxy} property="subdivisions" label="Subdivisions" step={1} min={1} />
 
 			<div
@@ -220,8 +220,8 @@ export function GroundMeshGeometryInspector(props: IGroundMeshGeometryInspectorP
 					<>
 						<div className="flex flex-1 flex-col gap-2">
 							<div className="px-2">HeightMap Properties</div>
-							<EditorInspectorNumberField object={proxy} property="minHeight" label="Min Height" step={1} />
-							<EditorInspectorNumberField object={proxy} property="maxHeight" label="Max Height" step={1} />
+							<EditorInspectorNumberField object={proxy} property="minHeight" label="最小高度 (m)" step={1} />
+							<EditorInspectorNumberField object={proxy} property="maxHeight" label="最大高度 (m)" step={1} />
 						</div>
 						<div
 							onClick={handleRemoveHeightMapTexture}

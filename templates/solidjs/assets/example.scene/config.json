@@ -97,7 +97,7 @@
     "physics": {
         "gravity": [
             0,
-            -981,
+            -9.81,
             0
         ]
     },
@@ -115,6 +115,12 @@
             "cameraId": "3ee0f345-7bea-4f59-a657-28c90a7d5e74"
         }
     ],
+    "metadata": {
+        "space": {
+            "worldUnit": "m",
+            "metersPerUnit": 1
+        }
+    },
     "editorCamera": {
         "tags": null,
         "ellipsoid": [

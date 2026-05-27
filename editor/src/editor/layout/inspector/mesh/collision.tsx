@@ -48,11 +48,7 @@ export class EditorMeshCollisionInspector extends Component<IEditorInspectorImpl
 		// }
 
 		return (
-			<EditorInspectorSectionField
-				title="碰撞"
-				isProcessing={this.state.computingCollisionMesh}
-				tooltip="Configure collisions using the collisions system of Babylon.js."
-			>
+			<EditorInspectorSectionField title="碰撞" isProcessing={this.state.computingCollisionMesh} tooltip="Configure collisions using the collisions system of Babylon.js.">
 				<EditorInspectorSwitchField
 					label="检查碰撞"
 					object={this._mesh}

@@ -34,6 +34,7 @@ import { parseDefaultRenderingPipeline, defaultPipelineCameraConfigurations } fr
 import { iblShadowsRenderingPipelineCameraConfigurations, parseIblShadowsRenderingPipeline } from "../../editor/rendering/ibl-shadows";
 
 import { createDirectoryIfNotExist } from "../../tools/fs";
+import { ensureSceneMetadataSpace } from "../space";
 
 import { createSceneLink } from "../../tools/scene/scene-link";
 import { updateIblShadowsRenderPipeline } from "../../tools/light/ibl";
@@ -105,6 +106,40 @@ export type ISceneLoaderPluginOptions = SceneLoaderOptions & {
 
 	assetsCache: Record<string, IAssetCache>;
 };
+
+/**
+ * 复制临时相机的基础视角参数到编辑器预览相机。
+ */
+function copyCameraViewToEditorCamera(source: Camera, target: EditorCamera): void {
+	target.position.copyFrom(source.position);
+	target.minZ = source.minZ;
+	target.maxZ = source.maxZ;
+
+	const sourceWithView = source as Camera & { fov?: number; rotation?: Vector3; rotationQuaternion?: { clone: () => NonNullable<EditorCamera["rotationQuaternion"]> } | null };
+
+	if (typeof sourceWithView.fov === "number") {
+		target.fov = sourceWithView.fov;
+	}
+
+	if (sourceWithView.rotation) {
+		target.rotation.copyFrom(sourceWithView.rotation);
+	}
+
+	target.rotationQuaternion = sourceWithView.rotationQuaternion?.clone() ?? null;
+}
+
+/**
+ * 重新启用编辑器预览相机并恢复交互配置。
+ */
+function activateEditorPreviewCamera(editor: Editor, camera: EditorCamera): void {
+	const scene = editor.layout.preview.scene;
+
+	scene.activeCamera?.detachControl();
+	scene.activeCamera = camera;
+	_GetAudioEngine(null).listener.attach(camera);
+	camera.attachControl(true);
+	camera.configureFromPreferences();
+}
 
 export async function loadScene(editor: Editor, projectPath: string, scenePath: string, options?: SceneLoaderOptions): Promise<SceneLoadResult> {
 	registerTextureParser(editor);
@@ -226,23 +261,36 @@ export async function loadScene(editor: Editor, projectPath: string, scenePath: 
 
 		if (!options?.asLink) {
 			// Metadata
-			scene.metadata = config.metadata;
+			scene.metadata = ensureSceneMetadataSpace(config.metadata);
 
 			// Load camera
-			const camera = Camera.Parse(config.editorCamera, scene) as EditorCamera | null;
+			let parsedEditorCamera: Camera | null = null;
 
-			if (camera) {
-				scene.activeCamera?.detachControl();
-
-				editor.layout.preview.camera.dispose();
-				editor.layout.preview.camera = camera;
-				scene.activeCamera = camera;
-
-				_GetAudioEngine(null).listener.attach(camera);
-
-				camera.attachControl(true);
-				camera.configureFromPreferences();
+			if (config.editorCamera) {
+				try {
+					parsedEditorCamera = Camera.Parse(config.editorCamera, scene);
+				} catch (e) {
+					const message = e instanceof Error ? e.message : String(e);
+					editor.layout.console.error(`加载编辑器相机失败，已回退到当前预览相机：${message}`);
+				}
+			} else {
+				editor.layout.console.log("缺少编辑器相机配置，已回退到当前预览相机。");
 			}
+
+			if (parsedEditorCamera && isEditorCamera(parsedEditorCamera)) {
+				editor.layout.preview.camera.dispose();
+				editor.layout.preview.camera = parsedEditorCamera;
+			} else {
+				const fallbackCamera = editor.layout.preview.camera;
+
+				if (parsedEditorCamera) {
+					copyCameraViewToEditorCamera(parsedEditorCamera, fallbackCamera);
+					parsedEditorCamera.dispose();
+					editor.layout.console.error("加载到的编辑器相机不是 EditorCamera，已回退到当前预览相机。");
+				}
+			}
+
+			activateEditorPreviewCamera(editor, editor.layout.preview.camera);
 
 			// Load environment
 			const environment = config.environment ?? {};

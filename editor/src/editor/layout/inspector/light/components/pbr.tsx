@@ -23,7 +23,7 @@ export function EditorLightPBRInspector(props: IEditorLightPBRInspectorProps) {
 				]}
 			/>
 
-			<EditorInspectorNumberField label="半径" object={props.object} property="radius" />
+			<EditorInspectorNumberField label="半径 (m)" object={props.object} property="radius" />
 		</>
 	);
 }

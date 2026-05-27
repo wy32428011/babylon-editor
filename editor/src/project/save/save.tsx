@@ -17,6 +17,8 @@ import { onProjectSavedObservable } from "../../tools/observables";
 import { getBase64SceneScreenshot } from "../../tools/scene/screenshot";
 import { tryGetProjectsFromLocalStorage } from "../../tools/local-storage";
 
+import { projectConfiguration } from "../configuration";
+
 import { saveScene } from "./scene";
 import { guardProjectSaveWrite } from "./safe-mode";
 import { EditorSaveProjectProgressComponent } from "./progress";
@@ -59,6 +61,7 @@ export async function saveProjectConfiguration(editor: Editor): Promise<Partial<
 			nameOrPath: plugin,
 		})),
 		version: packageJson.version,
+		space: projectConfiguration.space,
 		packageManager: editor.state.packageManager,
 		lastOpenedScene: editor.state.lastOpenedScenePath?.replace(dirname(editor.state.projectPath!), ""),
 
@@ -110,7 +113,7 @@ async function _saveProject(editor: Editor): Promise<boolean> {
 
 	if (!editor.props.editedScenePath) {
 		try {
-			const base64 = await getBase64SceneScreenshot(editor.layout.preview.scene);
+			const base64 = await editor.layout.preview.withPlacementGridHidden(() => getBase64SceneScreenshot(editor.layout.preview.scene));
 
 			const projects = tryGetProjectsFromLocalStorage();
 			const project = projects.find((project) => project.absolutePath === editor.state.projectPath);

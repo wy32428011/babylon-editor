@@ -27,6 +27,8 @@ import { updateLightShadowMapRefreshRate, updatePointLightShadowMapRenderListPre
 
 export const onGizmoNodeChangedObservable = new Observable<Node | Sprite>();
 
+export type EditorPreviewGizmoType = "position" | "position-plane" | "rotation" | "rotation-plane" | "scaling" | "none";
+
 export class EditorPreviewGizmo {
 	/**
 	 * @internal
@@ -37,6 +39,7 @@ export class EditorPreviewGizmo {
 	private _positionGizmo: PositionGizmo | null = null;
 	private _rotationGizmo: RotationGizmo | null = null;
 
+	private _gizmoType: EditorPreviewGizmoType = "none";
 	private _coordinatesMode: GizmoCoordinatesMode = GizmoCoordinatesMode.Local;
 
 	private _cameraGizmo: CameraGizmo | null = null;
@@ -66,20 +69,23 @@ export class EditorPreviewGizmo {
 	 * Sets the gizmo type.
 	 * @param gizmo The gizmo to set.
 	 */
-	public setGizmoType(gizmo: "position" | "rotation" | "scaling" | "none"): void {
+	public setGizmoType(gizmo: EditorPreviewGizmoType): void {
 		this.currentGizmo?.dispose();
 
+		this._gizmoType = gizmo;
 		this._scalingGizmo = null;
 		this._positionGizmo = null;
 		this._rotationGizmo = null;
 
 		switch (gizmo) {
 			case "position":
+			case "position-plane":
 				this._positionGizmo = new PositionGizmo(this._gizmosLayer);
 				this._positionGizmo.planarGizmoEnabled = true;
 				this._attachVector3UndoRedoEvents(this._positionGizmo, "position");
 				break;
 			case "rotation":
+			case "rotation-plane":
 				this._rotationGizmo = new RotationGizmo(this._gizmosLayer);
 				this._attachRotationUndoRedoEvents(this._rotationGizmo);
 				break;
@@ -94,15 +100,14 @@ export class EditorPreviewGizmo {
 			this.currentGizmo.coordinatesMode = this._coordinatesMode;
 
 			if (this._positionGizmo) {
-				// A bit of hacking.
-				this._positionGizmo.xPlaneGizmo["_coloredMaterial"].alpha = 0.3;
-				this._positionGizmo.xPlaneGizmo["_hoverMaterial"].alpha = 1;
+				this._positionGizmo.xPlaneGizmo.coloredMaterial.alpha = 0.3;
+				this._positionGizmo.xPlaneGizmo.hoverMaterial.alpha = 1;
 
-				this._positionGizmo.yPlaneGizmo["_coloredMaterial"].alpha = 0.3;
-				this._positionGizmo.yPlaneGizmo["_hoverMaterial"].alpha = 1;
+				this._positionGizmo.yPlaneGizmo.coloredMaterial.alpha = 0.3;
+				this._positionGizmo.yPlaneGizmo.hoverMaterial.alpha = 1;
 
-				this._positionGizmo.zPlaneGizmo["_coloredMaterial"].alpha = 0.3;
-				this._positionGizmo.zPlaneGizmo["_hoverMaterial"].alpha = 1;
+				this._positionGizmo.zPlaneGizmo.coloredMaterial.alpha = 0.3;
+				this._positionGizmo.zPlaneGizmo.hoverMaterial.alpha = 1;
 			}
 		}
 
@@ -205,6 +210,32 @@ export class EditorPreviewGizmo {
 					this.currentGizmo.yGizmo.isEnabled = false;
 				}
 			}
+
+			this._applyActiveGizmoConstraints();
+		}
+	}
+
+	/**
+	 * 根据当前操作模式限制 Gizmo 子手柄，确保平面模式不会重新暴露易误触的轴向手柄。
+	 */
+	private _applyActiveGizmoConstraints(): void {
+		if (this._positionGizmo) {
+			const horizontalPlaneOnly = this._gizmoType === "position-plane";
+
+			// 平面移动只保留 XZ 平面，避免误触 Y 轴箭头导致高度变化。
+			this._positionGizmo.xGizmo.isEnabled = !horizontalPlaneOnly;
+			this._positionGizmo.yGizmo.isEnabled = !horizontalPlaneOnly;
+			this._positionGizmo.zGizmo.isEnabled = !horizontalPlaneOnly;
+			this._positionGizmo.xPlaneGizmo.isEnabled = !horizontalPlaneOnly;
+			this._positionGizmo.yPlaneGizmo.isEnabled = true;
+			this._positionGizmo.zPlaneGizmo.isEnabled = !horizontalPlaneOnly;
+		}
+
+		if (this._rotationGizmo && this._gizmoType === "rotation-plane" && !this._attachedSprite) {
+			// 平面旋转只保留绕 Y 轴的水平旋转环，隐藏另外两个容易误触的旋转环。
+			this._rotationGizmo.xGizmo.isEnabled = false;
+			this._rotationGizmo.yGizmo.isEnabled = true;
+			this._rotationGizmo.zGizmo.isEnabled = false;
 		}
 	}
 

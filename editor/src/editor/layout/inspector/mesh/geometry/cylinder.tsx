@@ -35,9 +35,9 @@ export function CylinderMeshGeometryInspector(props: ICylinderMeshGeometryInspec
 
 	return (
 		<EditorInspectorSectionField title="圆柱体">
-			<EditorInspectorNumberField object={proxy} property="height" label="高度" step={0.1} />
-			<EditorInspectorNumberField object={proxy} property="diameterTop" label="Diameter Top" step={0.1} />
-			<EditorInspectorNumberField object={proxy} property="diameterBottom" label="Diameter Bottom" step={0.1} />
+			<EditorInspectorNumberField object={proxy} property="height" label="高度 (m)" step={0.1} />
+			<EditorInspectorNumberField object={proxy} property="diameterTop" label="顶部直径 (m)" step={0.1} />
+			<EditorInspectorNumberField object={proxy} property="diameterBottom" label="底部直径 (m)" step={0.1} />
 			<EditorInspectorNumberField object={proxy} property="subdivisions" label="Subdivisions" step={1} min={2} max={256} />
 		</EditorInspectorSectionField>
 	);

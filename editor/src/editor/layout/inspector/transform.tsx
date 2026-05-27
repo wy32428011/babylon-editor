@@ -47,9 +47,9 @@ export class EditorTransformNodeInspector extends Component<IEditorInspectorImpl
 				</EditorInspectorSectionField>
 
 				<EditorInspectorSectionField title="变换">
-					<EditorInspectorVectorField label={<div className="w-14">位置</div>} object={this.props.object} property="position" />
+					<EditorInspectorVectorField label={<div className="w-20">位置 (m)</div>} object={this.props.object} property="position" />
 					{EditorTransformNodeInspector.GetRotationInspector(this.props.object)}
-					<EditorInspectorVectorField label={<div className="w-14">缩放</div>} object={this.props.object} property="scaling" />
+					<EditorInspectorVectorField label={<div className="w-20">缩放 (倍)</div>} object={this.props.object} property="scaling" />
 
 					<EditorInspectorSwitchField
 						object={this.props.object.metadata}
@@ -107,14 +107,7 @@ export class EditorTransformNodeInspector extends Component<IEditorInspectorImpl
 			const o = { proxy };
 
 			return (
-				<EditorInspectorVectorField
-					label={<div className="w-14">旋转</div>}
-					object={o}
-					property="proxy"
-					asDegrees
-					step={0.1}
-					onFinishChange={() => onFinishChange?.()}
-				/>
+				<EditorInspectorVectorField label={<div className="w-14">旋转</div>} object={o} property="proxy" asDegrees step={0.1} onFinishChange={() => onFinishChange?.()} />
 			);
 		}
 

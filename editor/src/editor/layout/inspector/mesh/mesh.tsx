@@ -145,14 +145,14 @@ export class EditorMeshInspector extends Component<IEditorInspectorImplementatio
 
 				<EditorInspectorSectionField title="变换">
 					<EditorInspectorVectorField
-						label={<div className="w-14">位置</div>}
+						label={<div className="w-20">位置 (m)</div>}
 						object={this.props.object}
 						property="position"
 						onFinishChange={() => this._handleTransformsUpdated()}
 					/>
 					{EditorTransformNodeInspector.GetRotationInspector(this.props.object, () => this._handleTransformsUpdated())}
 					<EditorInspectorVectorField
-						label={<div className="w-14">缩放</div>}
+						label={<div className="w-20">缩放 (倍)</div>}
 						object={this.props.object}
 						property="scaling"
 						onFinishChange={() => this._handleTransformsUpdated()}

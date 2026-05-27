@@ -49,13 +49,13 @@ export class EditorFreeCameraInspector extends Component<IEditorInspectorImpleme
 				</EditorInspectorSectionField>
 
 				<EditorInspectorSectionField title="变换">
-					<EditorInspectorVectorField label={<div className="w-14">位置</div>} object={this.props.object} property="position" />
+					<EditorInspectorVectorField label={<div className="w-20">位置 (m)</div>} object={this.props.object} property="position" />
 					<EditorInspectorVectorField asDegrees label={<div className="w-14">旋转</div>} object={this.props.object} property="rotation" step={0.1} />
 				</EditorInspectorSectionField>
 
 				<EditorInspectorSectionField title="Fov">
-					<EditorInspectorNumberField object={this.props.object} property="minZ" label="Min Z" min={0.01} />
-					<EditorInspectorNumberField object={this.props.object} property="maxZ" label="Max Z" />
+					<EditorInspectorNumberField object={this.props.object} property="minZ" label="Min Z (m)" min={0.01} />
+					<EditorInspectorNumberField object={this.props.object} property="maxZ" label="Max Z (m)" />
 					<FocalLengthInspector camera={this.props.object} />
 				</EditorInspectorSectionField>
 

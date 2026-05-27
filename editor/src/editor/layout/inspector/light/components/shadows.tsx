@@ -270,7 +270,7 @@ export class EditorLightShadowsInspector extends Component<IEditorLightShadowsIn
 					]}
 				/>
 
-				{generator.usePoissonSampling && <EditorInspectorNumberField object={generator} property="blurScale" step={0.1} min={0} max={10} label="模糊缩放" />}
+				{generator.usePoissonSampling && <EditorInspectorNumberField object={generator} property="blurScale" step={0.1} min={0} max={10} label="模糊缩放 (倍)" />}
 
 				{generator.usePercentageCloserFiltering && !generator.useContactHardeningShadow && (
 					<>
@@ -313,12 +313,7 @@ export class EditorLightShadowsInspector extends Component<IEditorLightShadowsIn
 		return (
 			<>
 				{this.props.children}
-				<EditorInspectorSwitchField
-					object={generator}
-					property="stabilizeCascades"
-					label="稳定级联"
-					onChange={() => updateLightShadowMapRefreshRate(this.props.light)}
-				/>
+				<EditorInspectorSwitchField object={generator} property="stabilizeCascades" label="稳定级联" onChange={() => updateLightShadowMapRefreshRate(this.props.light)} />
 				<EditorInspectorSwitchField object={generator} property="depthClamp" label="深度钳制" onChange={() => updateLightShadowMapRefreshRate(this.props.light)} />
 				<EditorInspectorSwitchField
 					object={generator}

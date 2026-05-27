@@ -52,7 +52,7 @@ export class EditorSpotLightInspector extends Component<IEditorInspectorImplemen
 
 				<EditorInspectorSectionField title="变换">
 					<EditorInspectorVectorField
-						label={<div className="w-14">位置</div>}
+						label={<div className="w-20">位置 (m)</div>}
 						object={this.props.object}
 						property="position"
 						onChange={() => {
@@ -78,7 +78,7 @@ export class EditorSpotLightInspector extends Component<IEditorInspectorImplemen
 					<Divider />
 
 					<EditorInspectorNumberField
-						label="Range"
+						label="范围 (m)"
 						object={this.props.object}
 						property="range"
 						min={0}

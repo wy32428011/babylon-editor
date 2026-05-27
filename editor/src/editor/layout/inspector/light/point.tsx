@@ -51,7 +51,7 @@ export class EditorPointLightInspector extends Component<IEditorInspectorImpleme
 
 				<EditorInspectorSectionField title="变换">
 					<EditorInspectorVectorField
-						label={<div className="w-14">位置</div>}
+						label={<div className="w-20">位置 (m)</div>}
 						object={this.props.object}
 						property="position"
 						onChange={() => {
@@ -69,7 +69,7 @@ export class EditorPointLightInspector extends Component<IEditorInspectorImpleme
 
 					<EditorInspectorNumberField label="强度" object={this.props.object} property="intensity" />
 					<EditorInspectorNumberField
-						label="Range"
+						label="范围 (m)"
 						object={this.props.object}
 						property="range"
 						min={0}

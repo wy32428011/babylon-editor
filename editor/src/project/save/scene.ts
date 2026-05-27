@@ -32,6 +32,7 @@ import { iblShadowsRenderingPipelineCameraConfigurations } from "../../editor/re
 
 import { writeBinaryGeometry } from "../tools/geometry";
 import { writeBinaryMorphTarget } from "../tools/morph-target";
+import { ensureSceneMetadataSpace } from "../space";
 
 import { showSaveSceneProgressDialog } from "./dialog";
 import { guardProjectSaveWrite } from "./safe-mode";
@@ -78,6 +79,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 	await ensureSceneFolders(scenePath);
 
 	const scene = editor.layout.preview.scene;
+	scene.metadata = ensureSceneMetadataSpace(scene.metadata);
 	const meshesToSave = scene.meshes.filter((mesh) => {
 		if ((!isMesh(mesh) && !isCollisionMesh(mesh)) || mesh._masterMesh || isFromSceneLink(mesh) || !isNodeVisibleInGraph(mesh)) {
 			return false;
@@ -762,7 +764,7 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 					fogColor: scene.fogColor.asArray(),
 				},
 				physics: {
-					gravity: scene.getPhysicsEngine()?.gravity?.asArray(),
+					gravity: scene.getPhysicsEngine()?.gravity?.asArray() ?? [0, -9.81, 0],
 				},
 				rendering: scene.cameras.map((camera) => ({
 					cameraId: camera.id,

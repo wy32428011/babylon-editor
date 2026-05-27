@@ -72,7 +72,7 @@ export class RagdollEditorPreview extends Component<IRagdollEditorPreviewProps, 
 		this.camera.attachControl();
 
 		const hk = new HavokPlugin();
-		this.scene.enablePhysics(new Vector3(0, -981, 0), hk);
+		this.scene.enablePhysics(new Vector3(0, -9.81, 0), hk);
 
 		this._light = new DirectionalLight("light", new Vector3(-1, -2, -1), this.scene);
 

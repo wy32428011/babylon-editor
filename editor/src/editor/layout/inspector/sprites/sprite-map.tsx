@@ -69,7 +69,7 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 				</EditorInspectorSectionField>
 
 				<EditorInspectorSectionField title="变换">
-					<EditorInspectorVectorField label={<div className="w-14">位置</div>} object={this.props.object} property="position" />
+					<EditorInspectorVectorField label={<div className="w-20">位置 (m)</div>} object={this.props.object} property="position" />
 					{EditorTransformNodeInspector.GetRotationInspector(this.props.object)}
 				</EditorInspectorSectionField>
 
@@ -276,7 +276,7 @@ export class EditorSpriteMapNodeInspector extends Component<IEditorInspectorImpl
 				<EditorInspectorVectorField
 					object={this.state.selectedTile}
 					property="position"
-					label="位置"
+					label="瓦片位置"
 					step={1}
 					min={0}
 					max={[this.props.object.spriteMap!.options.stageSize?.x ?? 0, this.props.object.spriteMap!.options.stageSize?.y ?? 0]}

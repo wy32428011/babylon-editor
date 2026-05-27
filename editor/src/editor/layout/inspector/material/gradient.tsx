@@ -41,7 +41,7 @@ export class EditorGradientMaterialInspector extends Component<IEditorGradientMa
 					<EditorInspectorNumberField label="顶部颜色 Alpha" object={this.props.material} property="topColorAlpha" min={0} max={1} />
 					<EditorInspectorNumberField label="底部颜色 Alpha" object={this.props.material} property="bottomColorAlpha" min={0} max={1} />
 
-					<EditorInspectorNumberField label="缩放" object={this.props.material} property="scale" min={-1} max={1} />
+					<EditorInspectorNumberField label="缩放 (倍)" object={this.props.material} property="scale" min={-1} max={1} />
 					<EditorInspectorNumberField label="偏移" object={this.props.material} property="offset" />
 					<EditorInspectorNumberField label="平滑度" object={this.props.material} property="smoothness" />
 				</EditorInspectorSectionField>

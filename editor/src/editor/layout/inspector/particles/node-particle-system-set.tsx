@@ -63,9 +63,9 @@ export class EditorNodeParticleSystemSetMeshInspector extends Component<
 				</EditorInspectorSectionField>
 
 				<EditorInspectorSectionField title="变换">
-					<EditorInspectorVectorField label={<div className="w-14">位置</div>} object={this.props.object} property="position" />
+					<EditorInspectorVectorField label={<div className="w-20">位置 (m)</div>} object={this.props.object} property="position" />
 					{EditorTransformNodeInspector.GetRotationInspector(this.props.object)}
-					<EditorInspectorVectorField label={<div className="w-14">缩放</div>} object={this.props.object} property="scaling" />
+					<EditorInspectorVectorField label={<div className="w-20">缩放 (倍)</div>} object={this.props.object} property="scaling" />
 				</EditorInspectorSectionField>
 
 				<EditorInspectorSectionField title="Particle System Set">

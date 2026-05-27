@@ -48,6 +48,7 @@ import { getMaterialCommands, getMaterialsLibraryCommands } from "../dialogs/com
 
 import { loadScene } from "../../project/load/scene";
 import { saveProject, saveProjectConfiguration } from "../../project/save/save";
+import { ensureSceneMetadataSpace } from "../../project/space";
 import { getProjectAssetsRootUrl, onProjectConfigurationChangedObservable, projectConfiguration } from "../../project/configuration";
 
 import { Button } from "../../ui/shadcn/ui/button";
@@ -1137,7 +1138,7 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 
 		const config = {
 			newScene: true,
-			metadata: {},
+			metadata: ensureSceneMetadataSpace(),
 			environment: {
 				environmentIntensity: 1,
 			},

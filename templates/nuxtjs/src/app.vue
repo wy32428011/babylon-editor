@@ -49,7 +49,7 @@ let resizeListener: (() => void) | null = null;
 
 async function handleLoad(engine: Engine, scene: Scene) {
 	const havok = await HavokPhysics();
-	scene.enablePhysics(new Vector3(0, -981, 0), new HavokPlugin(true, havok));
+	scene.enablePhysics(new Vector3(0, -9.81, 0), new HavokPlugin(true, havok));
 
 	SceneLoaderFlags.ForceFullSceneLoadingForIncremental = true;
 	await loadScene("/scene/", "example.babylon", scene, scriptsMap, {

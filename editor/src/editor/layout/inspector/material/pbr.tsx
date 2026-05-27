@@ -114,13 +114,7 @@ export class EditorPBRMaterialInspector extends Component<IEditorPBRMaterialInsp
 					</EditorInspectorTextureField>
 
 					<EditorInspectorTextureField object={this.props.material} title="Opacity Texture" property="opacityTexture" />
-					<EditorInspectorTextureField
-						object={this.props.material}
-						title="反射纹理"
-						property="reflectionTexture"
-						acceptCubeTexture
-						onChange={() => this.forceUpdate()}
-					/>
+					<EditorInspectorTextureField object={this.props.material} title="反射纹理" property="reflectionTexture" acceptCubeTexture onChange={() => this.forceUpdate()} />
 
 					<EditorInspectorTextureField object={this.props.material} title="金属度纹理" property="metallicTexture" onChange={() => this.forceUpdate()}>
 						{this.props.material.metallicTexture && (
@@ -231,16 +225,8 @@ export class EditorPBRMaterialInspector extends Component<IEditorPBRMaterialInsp
 						<EditorInspectorNumberField label="Microsurface" object={this.props.material} property="microSurface" min={0} max={1} />
 						{this.props.material.reflectivityTexture && (
 							<>
-								<EditorInspectorSwitchField
-									label="从反射率贴图自动使用微表面"
-									object={this.props.material}
-									property="useAutoMicroSurfaceFromReflectivityMap"
-								/>
-								<EditorInspectorSwitchField
-									label="从反射率贴图 Alpha 使用微表面"
-									object={this.props.material}
-									property="useMicroSurfaceFromReflectivityMapAlpha"
-								/>
+								<EditorInspectorSwitchField label="从反射率贴图自动使用微表面" object={this.props.material} property="useAutoMicroSurfaceFromReflectivityMap" />
+								<EditorInspectorSwitchField label="从反射率贴图 Alpha 使用微表面" object={this.props.material} property="useMicroSurfaceFromReflectivityMapAlpha" />
 							</>
 						)}
 					</EditorInspectorSectionField>
@@ -249,24 +235,14 @@ export class EditorPBRMaterialInspector extends Component<IEditorPBRMaterialInsp
 				<EditorDetailMapInspector material={this.props.material} />
 
 				<EditorInspectorSectionField title="次表面">
-					<EditorInspectorSwitchField
-						noUndoRedo
-						object={this.state}
-						property="subSurfaceEnabled"
-						label="启用"
-						onChange={(v) => this._handleSubSurfaceEnabledChange(v)}
-					/>
+					<EditorInspectorSwitchField noUndoRedo object={this.state} property="subSurfaceEnabled" label="启用" onChange={(v) => this._handleSubSurfaceEnabledChange(v)} />
 
 					{this.state.subSurfaceEnabled && (
 						<>
 							<EditorInspectorColorField label={<div className="w-14">染色</div>} object={this.props.material.subSurface} property="tintColor" />
 
 							<EditorInspectorTextureField scene={scene} object={this.props.material.subSurface} property="thicknessTexture" title="厚度纹理">
-								<EditorInspectorSwitchField
-									label="从厚度纹理使用遮罩"
-									object={this.props.material.subSurface}
-									property="useMaskFromThicknessTexture"
-								/>
+								<EditorInspectorSwitchField label="从厚度纹理使用遮罩" object={this.props.material.subSurface} property="useMaskFromThicknessTexture" />
 								<EditorInspectorNumberField label="Minimum Thickness" object={this.props.material.subSurface} property="minimumThickness" min={0} />
 								<EditorInspectorNumberField label="Maximum Thickness" object={this.props.material.subSurface} property="maximumThickness" min={0} />
 							</EditorInspectorTextureField>

@@ -34,7 +34,7 @@ export function PlaneMeshGeometryInspector(props: IPlaneMeshGeometryInspectorPro
 
 	return (
 		<EditorInspectorSectionField title="平面">
-			<EditorInspectorNumberField object={proxy} property="size" label="大小" step={0.1} />
+			<EditorInspectorNumberField object={proxy} property="size" label="大小 (m)" step={0.1} />
 			<EditorInspectorListField
 				object={proxy}
 				property="sideOrientation"

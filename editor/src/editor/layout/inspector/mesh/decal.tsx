@@ -35,8 +35,8 @@ export class MeshDecalInspector extends Component<IMeshDecalInspectorProps, IMes
 
 		return (
 			<EditorInspectorSectionField title="贴花">
-				<EditorInspectorNumberField object={proxy} property="sizeX" step={1} label="宽度" onChange={() => this._handleUpdateCurrentDecalMesh()} />
-				<EditorInspectorNumberField object={proxy} property="sizeY" step={1} label="高度" onChange={() => this._handleUpdateCurrentDecalMesh()} />
+				<EditorInspectorNumberField object={proxy} property="sizeX" step={1} label="宽度 (m)" onChange={() => this._handleUpdateCurrentDecalMesh()} />
+				<EditorInspectorNumberField object={proxy} property="sizeY" step={1} label="高度 (m)" onChange={() => this._handleUpdateCurrentDecalMesh()} />
 
 				<EditorInspectorNumberField asDegrees object={proxy} property="angle" step={0.1} label="角度" onChange={() => this._handleUpdateCurrentDecalMesh()} />
 

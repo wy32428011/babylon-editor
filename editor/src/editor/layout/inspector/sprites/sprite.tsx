@@ -74,11 +74,11 @@ export class EditorSpriteInspector extends Component<IEditorInspectorImplementat
 				</EditorInspectorSectionField>
 
 				<EditorInspectorSectionField title="变换">
-					<EditorInspectorVectorField label="position" object={this.props.object} property="position" />
+					<EditorInspectorVectorField label="位置 (m)" object={this.props.object} property="position" />
 				</EditorInspectorSectionField>
 
 				<EditorInspectorSectionField title="Dimensions">
-					<EditorInspectorDimensionsField object={this.props} property="object" label="大小" onFinishChange={() => this.forceUpdate()} />
+					<EditorInspectorDimensionsField object={this.props} property="object" label="大小 (m)" onFinishChange={() => this.forceUpdate()} />
 					{this._spriteManagerNode?.atlasJson && (
 						<Button variant="ghost" className="flex gap-2 items-center" onClick={() => this._resetDimensionsFromAtlasJson()}>
 							<LuRefreshCcw className="w-4 h-4" /> Reset to source size

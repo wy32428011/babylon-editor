@@ -23,6 +23,7 @@ import { openSingleFolderDialog } from "../tools/dialog";
 import { isPackageManagerAvailable } from "../tools/process";
 import { tryAddProjectToLocalStorage } from "../tools/local-storage";
 
+import { getEditorProjectSpace } from "../project/space";
 import { EditorProjectPackageManager, IEditorProject, EditorProjectTemplate } from "../project/typings";
 
 export interface IDashboardCreateProjectDialogProps {
@@ -154,6 +155,7 @@ export function DashboardCreateProjectDialog(props: IDashboardCreateProjectDialo
 
 		const projectContent = (await readJSON(projectAbsolutePath)) as IEditorProject;
 		projectContent.packageManager = packageManager;
+		projectContent.space = getEditorProjectSpace(projectContent.space);
 
 		await writeJSON(projectAbsolutePath, projectContent, {
 			spaces: "\t",

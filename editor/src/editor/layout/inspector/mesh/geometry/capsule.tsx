@@ -36,8 +36,8 @@ export function CapsuleMeshGeometryInspector(props: ICapsuleMeshGeometryInspecto
 
 	return (
 		<EditorInspectorSectionField title="胶囊体">
-			<EditorInspectorNumberField object={proxy} property="radius" label="半径" step={0.1} />
-			<EditorInspectorNumberField object={proxy} property="height" label="高度" step={0.1} />
+			<EditorInspectorNumberField object={proxy} property="radius" label="半径 (m)" step={0.1} />
+			<EditorInspectorNumberField object={proxy} property="height" label="高度 (m)" step={0.1} />
 			<EditorInspectorNumberField object={proxy} property="subdivisions" label="Subdivisions" step={1} min={2} max={256} />
 			<EditorInspectorNumberField object={proxy} property="topCapSubdivisions" label="Top Cap Subdivisions" step={1} min={2} max={256} />
 			<EditorInspectorNumberField object={proxy} property="bottomCapSubdivisions" label="Bottom Cap Subdivisions" step={1} min={2} max={256} />

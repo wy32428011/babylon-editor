@@ -422,7 +422,7 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 					/>
 				</EditorInspectorSectionField>
 
-				<EditorInspectorSectionField title="缩放">
+				<EditorInspectorSectionField title="缩放 (倍)">
 					<EditorInspectorNumberField
 						noUndoRedo={this.props.noUndoRedo}
 						label="U Scale"

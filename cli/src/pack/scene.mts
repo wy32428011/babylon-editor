@@ -512,6 +512,10 @@ export async function createBabylonScene(options: ICreateBabylonSceneOptions) {
 
 		metadata: {
 			...options.config.metadata,
+			space: options.config.metadata?.space ?? {
+				worldUnit: "m",
+				metersPerUnit: 1,
+			},
 			rendering: options.config.rendering,
 			clusteredLight: options.config.clusteredLight,
 		},

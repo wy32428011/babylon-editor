@@ -35,7 +35,7 @@ export function SphereMeshGeometryInspector(props: ISphereMeshGeometryInspectorP
 
 	return (
 		<EditorInspectorSectionField title="球体">
-			<EditorInspectorNumberField object={proxy} property="diameter" label="Diameter" step={0.1} min={0.01} />
+			<EditorInspectorNumberField object={proxy} property="diameter" label="直径 (m)" step={0.1} min={0.01} />
 			<EditorInspectorNumberField object={proxy} property="segments" label="Segments" step={0.1} min={2} />
 			<EditorInspectorListField
 				object={proxy}

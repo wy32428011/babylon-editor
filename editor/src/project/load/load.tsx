@@ -12,6 +12,7 @@ import { tryGetSafeOpenModeFromLocalStorage } from "../../tools/local-storage";
 import { defaultGizmoSnapPreferences, roundGizmoSnapSteps } from "../../tools/scene/gizmo";
 
 import { projectConfiguration } from "../configuration";
+import { getEditorProjectSpace } from "../space";
 import { EditorProjectPackageManager, IEditorProject } from "../typings";
 
 import { loadScene } from "./scene";
@@ -29,6 +30,7 @@ export async function loadProject(editor: Editor, path: string) {
 	const project = (await readJSON(path, "utf-8")) as IEditorProject;
 	const packageManager = project.packageManager ?? "yarn";
 	const gizmoSnap = roundGizmoSnapSteps({ ...defaultGizmoSnapPreferences, ...(project.gizmoSnap ?? {}) });
+	const space = getEditorProjectSpace(project.space);
 	const safeMode = tryGetSafeOpenModeFromLocalStorage();
 
 	editor.setState({
@@ -46,6 +48,7 @@ export async function loadProject(editor: Editor, path: string) {
 	editor.layout.preview?.updateGizmoSnapPreferences(gizmoSnap);
 
 	projectConfiguration.compressedTexturesEnabled = project.compressedTexturesEnabled ?? false;
+	projectConfiguration.space = space;
 
 	// Update dependencies
 	checkDependencies(editor, {
