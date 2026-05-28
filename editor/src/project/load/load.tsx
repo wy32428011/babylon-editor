@@ -15,6 +15,7 @@ import { projectConfiguration } from "../configuration";
 import { getEditorProjectSpace } from "../space";
 import { EditorProjectPackageManager, IEditorProject } from "../typings";
 
+import { restoreCadGroundReferences } from "./cad";
 import { loadScene } from "./scene";
 import { LoadScenePrepareComponent } from "./prepare";
 import { installBabylonJSEditorCLI, installBabylonJSEditorTools, installDependencies } from "./install";
@@ -73,6 +74,7 @@ export async function loadProject(editor: Editor, path: string) {
 		}
 
 		await loadScene(editor, directory, absolutePath, { safeMode });
+		await restoreCadGroundReferences(editor, editor.layout.preview.scene, directory);
 
 		editor.layout.preview.scene.onBeforeRenderObservable.addOnce(() => {
 			editor.layout.graph.refresh();

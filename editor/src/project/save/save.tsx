@@ -13,6 +13,7 @@ import { IEditorProject } from "../typings";
 // import { exportProject } from "../export/export";
 
 import { projectsKey } from "../../tools/project";
+import { runWithoutCadGeneratedTransformNodes } from "../../tools/cad/ground-importer";
 import { onProjectSavedObservable } from "../../tools/observables";
 import { getBase64SceneScreenshot } from "../../tools/scene/screenshot";
 import { tryGetProjectsFromLocalStorage } from "../../tools/local-storage";
@@ -99,7 +100,7 @@ async function _saveProject(editor: Editor): Promise<boolean> {
 
 	if (editor.state.lastOpenedScenePath) {
 		editor.layout.console.log(`Saving project "${project.lastOpenedScene}"`);
-		const sceneSaved = await saveScene(editor, directory, editor.state.lastOpenedScenePath);
+		const sceneSaved = await runWithoutCadGeneratedTransformNodes(editor.layout.preview.scene, () => saveScene(editor, directory, editor.state.lastOpenedScenePath!));
 		if (!sceneSaved) {
 			toast.dismiss(toastId);
 			return false;

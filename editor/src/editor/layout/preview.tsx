@@ -1,5 +1,6 @@
 import { ipcRenderer, webUtils } from "electron";
 import { extname, basename, dirname, join } from "path/posix";
+import { readFile } from "fs-extra";
 
 import { toast } from "sonner";
 import { Component, MouseEvent, ReactNode } from "react";
@@ -39,11 +40,8 @@ import {
 	Color4,
 	BoundingBox,
 	MeshBuilder,
-	Material,
 	SelectionOutlineLayer,
 	ClusteredLightContainer,
-	StandardMaterial,
-	Texture,
 	Tools,
 	_GetAudioEngine,
 } from "babylonjs";
@@ -53,6 +51,8 @@ import { GridMaterial } from "babylonjs-materials";
 import { SpinnerUIComponent } from "../../ui/spinner";
 
 import { Button } from "../../ui/shadcn/ui/button";
+import { Input } from "../../ui/shadcn/ui/input";
+import { Label } from "../../ui/shadcn/ui/label";
 import { Toggle } from "../../ui/shadcn/ui/toggle";
 import { Switch } from "../../ui/shadcn/ui/switch";
 import { Progress } from "../../ui/shadcn/ui/progress";
@@ -61,7 +61,7 @@ import { ToolbarRadioGroup, ToolbarRadioGroupItem } from "../../ui/shadcn/ui/too
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../ui/shadcn/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../ui/shadcn/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "../../ui/shadcn/ui/dropdown-menu";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../../ui/shadcn/ui/alert-dialog";
+import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../../ui/shadcn/ui/alert-dialog";
 
 import { Editor } from "../main";
 
@@ -84,8 +84,10 @@ import { onTextureAddedObservable } from "../../tools/observables";
 import { getCameraFocusPositionFor } from "../../tools/camera/focus";
 import { ITweenConfiguration, Tween } from "../../tools/animation/tween";
 import { checkProjectCachedCompressedTextures } from "../../tools/assets/ktx";
-import { createCadDrawingMetadata, ICadDrawingImportResult, ICadDrawingImportProgress, isSupportedCadDrawingFile, normalizeCadDrawingPath, prepareCadDrawingImport } from "../../tools/cad/drawing";
-import { CAD_MODEL_FULL_SHEET_CANDIDATE_ID, createCadDxfReferenceImage, ICadDrawingSheetCandidate, ICadDxfReferenceImageResult } from "../../tools/cad/dxf";
+import { ICadDrawingImportResult, ICadDrawingImportProgress, isSupportedCadDrawingFile, normalizeCadDrawingPath, prepareCadDrawingImport } from "../../tools/cad/drawing";
+import { sanitizeCadNodeName } from "../../tools/cad/coordinate";
+import { importCadGround } from "../../tools/cad/ground-importer";
+import type { CadImportUnit } from "../../tools/cad/types";
 import { createSceneLink, getRootSceneLink } from "../../tools/scene/scene-link";
 import { UniqueNumber, waitNextAnimationFrame, waitUntil } from "../../tools/tools";
 import { isSprite, isSpriteManagerNode, isSpriteMapNode } from "../../tools/guards/sprites";
@@ -130,7 +132,7 @@ import { applyTextureAssetToObject } from "./preview/import/texture";
 import { applyMaterialAssetToObject } from "./preview/import/material";
 import { EditorPreviewCadImportProgress, EditorPreviewConvertProgress } from "./preview/import/progress";
 import { loadImportedParticleSystemFile } from "./preview/import/particles";
-import { configureImportedTexture, ILoadImportedSceneFileOptions, loadImportedSceneFile, tryConvertSceneFile } from "./preview/import/import";
+import { ILoadImportedSceneFileOptions, loadImportedSceneFile, tryConvertSceneFile } from "./preview/import/import";
 
 const IMPORTED_MODEL_BOUNDS_MAX_DIMENSION = 1000000000;
 const CAD_AUTO_FOCUS_MAX_DIMENSION = 10000000;
@@ -140,6 +142,7 @@ const PREVIEW_GRID_NAME = "__editor_preview_placement_grid__";
 const PREVIEW_GRID_RENDER_SIZE = 100000;
 const PREVIEW_GRID_MAJOR_STEP = 100;
 const PREVIEW_GRID_Y_OFFSET = 0.01;
+const PREVIEW_GRID_RENDERING_GROUP_ID = 2;
 const PREVIEW_GRID_FLASH_PERIOD_MS = 1600;
 const PREVIEW_GRID_BASE_OPACITY = 0.36;
 const PREVIEW_GRID_FLASH_OPACITY = 0.62;
@@ -149,6 +152,7 @@ const PREVIEW_GRID_BASE_MAIN_COLOR = new Color3(0.48, 0.48, 0.48);
 const PREVIEW_GRID_FLASH_MAIN_COLOR = new Color3(0.56, 0.6, 0.62);
 const PREVIEW_GRID_BASE_LINE_COLOR = new Color3(0.72, 0.72, 0.72);
 const PREVIEW_GRID_FLASH_LINE_COLOR = new Color3(0.34, 0.86, 1);
+const CAD_DWG_CONVERTER_PATH_STORAGE_KEY = "babylonjs-editor-cad-dwg-converter-path";
 const PREVIEW_GRID_SIZE_OPTIONS: { label: string; value: PlacementGridSize; divisions: number }[] = [
 	{ label: "小格 25 m", value: "4x4", divisions: 4 },
 	{ label: "小格 12.5 m", value: "8x8", divisions: 8 },
@@ -169,10 +173,15 @@ interface IImportedModelFitBounds {
 	bottomCenter: Vector3;
 }
 
-interface ICadDrawingSheetSelectionState {
+interface ICadImportConfigurationState {
 	sourcePath: string;
-	candidates: ICadDrawingSheetCandidate[];
-	selectedCandidateId: string;
+	cadId: string;
+	converterPath: string;
+	unit: CadImportUnit;
+	textureLongSide: number;
+	alpha: number;
+	drawVectorLines: boolean;
+	importing: boolean;
 }
 
 /**
@@ -223,40 +232,54 @@ function getPlacementGridSizeLabel(size: PlacementGridSize): string {
 }
 
 /**
- * 将本机缩略图路径转换为 Electron 渲染进程可显示的 file URL。
- * @param absolutePath 定义本机缩略图绝对路径。
+ * 根据 CAD 源文件生成默认 cadId。
+ * @param sourcePath 定义可选的 CAD 源文件路径。
  */
-function getCadDrawingSheetThumbnailUrl(absolutePath: string): string {
-	const normalizedPath = normalizeCadDrawingPath(absolutePath).replace(/^\/+/, "");
-	const encodedPath = normalizedPath
-		.split("/")
-		.map((segment, index) => (index === 0 && /^[a-z]:$/i.test(segment) ? segment : encodeURIComponent(segment)))
-		.join("/");
-	return `file:///${encodedPath}`;
+function createCadImportDefaultId(sourcePath: string): string {
+	if (!sourcePath) {
+		return `cad_${Date.now()}`;
+	}
+
+	return sanitizeCadNodeName(basename(sourcePath, extname(sourcePath)));
 }
 
 /**
- * 把图纸候选来源转换为用户可读标签。
- * @param source 定义图纸候选来源。
+ * 根据 CAD 源文件类型选择默认单位；DWG 展会平面图优先按毫米处理。
+ * @param sourcePath 定义可选的 CAD 源文件路径。
  */
-function getCadDrawingSheetSourceLabel(source: ICadDrawingSheetCandidate["source"]): string {
-	switch (source) {
-		case "block":
-			return "块图纸";
-		case "cluster":
-			return "空间区域";
-		default:
-			return "完整图纸";
+function createCadImportDefaultUnit(sourcePath: string): CadImportUnit {
+	if (!sourcePath || extname(sourcePath).toLowerCase() === ".dwg") {
+		return "mm";
+	}
+
+	return "auto";
+}
+
+/**
+ * 从本地配置中读取上次使用的 DWG 转换器路径。
+ */
+function tryGetCadDwgConverterPathFromLocalStorage(): string {
+	try {
+		return window.localStorage.getItem(CAD_DWG_CONVERTER_PATH_STORAGE_KEY) ?? "";
+	} catch (e) {
+		return "";
 	}
 }
 
 /**
- * 格式化图纸候选真实尺寸。
- * @param candidate 定义图纸候选。
+ * 保存本次填写的 DWG 转换器路径，便于后续导入复用。
+ * @param converterPath 定义用户填写或选择的转换器路径。
  */
-function formatCadDrawingSheetSize(candidate: ICadDrawingSheetCandidate): string {
-	const size = candidate.bounds.size;
-	return `${size[0].toFixed(2)} × ${size[1].toFixed(2)} m`;
+function trySetCadDwgConverterPathToLocalStorage(converterPath: string): void {
+	try {
+		if (converterPath.trim()) {
+			window.localStorage.setItem(CAD_DWG_CONVERTER_PATH_STORAGE_KEY, converterPath.trim());
+		} else {
+			window.localStorage.removeItem(CAD_DWG_CONVERTER_PATH_STORAGE_KEY);
+		}
+	} catch (e) {
+		// 浏览器隐私配置可能禁用 localStorage，转换器路径仅作为便捷配置，失败时不影响导入。
+	}
 }
 
 export interface IEditorPreviewProps {
@@ -280,7 +303,7 @@ export interface IEditorPreviewState {
 	showSceneHelperIcons: boolean;
 	showPlacementGrid: boolean;
 	placementGridSize: PlacementGridSize;
-	cadSheetSelection?: ICadDrawingSheetSelectionState;
+	cadImportConfiguration?: ICadImportConfigurationState;
 	statsValues?: StatsValuesType;
 
 	playEnabled: boolean;
@@ -360,7 +383,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	private _objectUnderPointer: AbstractMesh | Sprite | null = null;
 	private _placementGrid: AbstractMesh | null = null;
 	private _placementGridControl: Vector4 = Vector4.Zero();
-	private _cadSheetSelectionResolve: ((candidate: ICadDrawingSheetCandidate | null) => void) | null = null;
+	private _cadImportConfigurationResolve: ((completed: boolean) => void) | null = null;
 
 	private _workingCanvas: HTMLCanvasElement | null = null;
 	private _mainView: EngineView | null = null;
@@ -460,7 +483,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 					<div>{this.state.informationMessage}</div>
 				</div>
 
-				{this._getCadDrawingSheetSelectionDialog()}
+				{this._getCadImportConfigurationDialog()}
 			</div>
 		);
 	}
@@ -1015,6 +1038,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		grid.id = PREVIEW_GRID_NAME;
 		grid.material = material;
 		grid.isPickable = false;
+		grid.renderingGroupId = PREVIEW_GRID_RENDERING_GROUP_ID;
 		grid.alwaysSelectAsActiveMesh = true;
 		grid.doNotSerialize = true;
 		grid.metadata = {
@@ -1022,6 +1046,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			doNotSerialize: true,
 			editorPreviewGrid: true,
 		};
+		this.scene.setRenderingAutoClearDepthStencil(PREVIEW_GRID_RENDERING_GROUP_ID, false, false, false);
 		setNodeVisibleInGraph(grid, false);
 		grid._removeFromSceneRootNodes();
 
@@ -1922,57 +1947,117 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	}
 
 	/**
-	 * 渲染 CAD 多图纸选择弹窗。
+	 * 渲染 CAD 导入配置弹窗。
 	 */
-	private _getCadDrawingSheetSelectionDialog(): ReactNode {
-		const selection = this.state.cadSheetSelection;
-		if (!selection) {
+	private _getCadImportConfigurationDialog(): ReactNode {
+		const configuration = this.state.cadImportConfiguration;
+		if (!configuration) {
 			return null;
 		}
 
-		const selectedCandidate = selection.candidates.find((candidate) => candidate.id === selection.selectedCandidateId);
 		return (
 			<AlertDialog open>
-				<AlertDialogContent className="w-[min(96vw,980px)] max-w-none">
+				<AlertDialogContent className="w-[min(94vw,620px)] max-w-none">
 					<AlertDialogHeader>
-						<AlertDialogTitle>选择 CAD 图纸</AlertDialogTitle>
-						<AlertDialogDescription>已从 {basename(selection.sourcePath)} 中识别出 {selection.candidates.length} 个候选图纸，选择需要贴到地面的图纸。</AlertDialogDescription>
+						<AlertDialogTitle>导入 CAD 图纸</AlertDialogTitle>
+						<AlertDialogDescription>{"设置 DXF/DWG 贴地导入参数，CAD 坐标会按 X -> X、Y -> -Z、Z -> Y 映射到 Babylon 米制世界。"}</AlertDialogDescription>
 					</AlertDialogHeader>
 
-					<div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 max-h-[62vh] overflow-y-auto pr-1">
-						{selection.candidates.map((candidate) => {
-							const selected = candidate.id === selection.selectedCandidateId;
-							return (
-								<button
-									key={candidate.id}
-									type="button"
-									className={`flex flex-col gap-2 rounded-md border p-2 text-left transition-colors ${selected ? "border-primary bg-primary/10" : "border-border bg-muted/20 hover:bg-muted/40"}`}
-									onClick={() => this._setCadDrawingSheetSelection(candidate.id)}
-									onDoubleClick={() => this._confirmCadDrawingSheetSelection()}
-								>
-									<div className="flex items-center justify-between gap-2">
-										<div className="font-medium truncate" title={candidate.name}>
-											{candidate.name}
-										</div>
-										<div className="shrink-0 text-xs text-muted-foreground">{getCadDrawingSheetSourceLabel(candidate.source)}</div>
-									</div>
-									<div className="flex items-center justify-center h-40 rounded bg-white/90 overflow-hidden">
-										<img alt={candidate.name} src={getCadDrawingSheetThumbnailUrl(candidate.thumbnailPath)} className="max-w-full max-h-full object-contain" />
-									</div>
-									<div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-										<span>{formatCadDrawingSheetSize(candidate)}</span>
-										<span>{candidate.entityCount} 条线段</span>
-									</div>
-								</button>
-							);
-						})}
+					<div className="grid gap-4">
+						<div className="grid gap-2">
+							<Label htmlFor="cad-import-file">文件</Label>
+							<div className="flex gap-2">
+								<Input id="cad-import-file" value={configuration.sourcePath} readOnly placeholder="选择 .dxf 或 .dwg 文件" />
+								<Button variant="outline" disabled={configuration.importing} onClick={() => this._chooseCadImportFile()}>
+									选择文件
+								</Button>
+							</div>
+						</div>
+
+						<div className="grid gap-2">
+							<Label htmlFor="cad-import-converter">DWG 转换器路径（可选）</Label>
+							<div className="flex gap-2">
+								<Input
+									id="cad-import-converter"
+									value={configuration.converterPath}
+									disabled={configuration.importing}
+									placeholder="优先使用 ODAFileConverter.exe；留空时自动探测"
+									onChange={(ev) => this._updateCadImportConfiguration({ converterPath: normalizeCadDrawingPath(ev.currentTarget.value) })}
+								/>
+								<Button variant="outline" disabled={configuration.importing} onClick={() => this._chooseCadDwgConverterFile()}>
+									选择
+								</Button>
+							</div>
+						</div>
+
+						<div className="grid gap-2">
+							<Label htmlFor="cad-import-id">cadId</Label>
+							<Input id="cad-import-id" value={configuration.cadId} disabled={configuration.importing} onChange={(ev) => this._updateCadImportConfiguration({ cadId: ev.currentTarget.value })} />
+						</div>
+
+						<div className="grid gap-2">
+							<Label>单位</Label>
+							<Select value={configuration.unit} disabled={configuration.importing} onValueChange={(value) => this._updateCadImportConfiguration({ unit: value as CadImportUnit })}>
+								<SelectTrigger>
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="auto">auto（读取 $INSUNITS）</SelectItem>
+									<SelectItem value="mm">mm</SelectItem>
+									<SelectItem value="cm">cm</SelectItem>
+									<SelectItem value="m">m</SelectItem>
+								</SelectContent>
+							</Select>
+						</div>
+
+						<div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+							<div className="grid gap-2">
+								<Label htmlFor="cad-import-texture">贴图最长边像素</Label>
+								<Input
+									id="cad-import-texture"
+									type="number"
+									min={512}
+									max={8192}
+									step={256}
+									value={configuration.textureLongSide}
+									disabled={configuration.importing}
+									onChange={(ev) => this._updateCadImportConfiguration({ textureLongSide: Number(ev.currentTarget.value) })}
+								/>
+							</div>
+
+							<div className="grid gap-2">
+								<Label htmlFor="cad-import-alpha">透明度</Label>
+								<Input
+									id="cad-import-alpha"
+									type="number"
+									min={0.05}
+									max={1}
+									step={0.05}
+									value={configuration.alpha}
+									disabled={configuration.importing}
+									onChange={(ev) => this._updateCadImportConfiguration({ alpha: Number(ev.currentTarget.value) })}
+								/>
+							</div>
+						</div>
+
+						<div className="flex items-center justify-between gap-4 rounded-md border p-3">
+							<Label htmlFor="cad-import-vector-lines">生成矢量线图层</Label>
+							<Switch
+								id="cad-import-vector-lines"
+								checked={configuration.drawVectorLines}
+								disabled={configuration.importing}
+								onCheckedChange={(checked) => this._updateCadImportConfiguration({ drawVectorLines: checked })}
+							/>
+						</div>
 					</div>
 
 					<AlertDialogFooter>
-						<AlertDialogCancel onClick={() => this._cancelCadDrawingSheetSelection()}>取消</AlertDialogCancel>
-						<AlertDialogAction disabled={!selectedCandidate} onClick={() => this._confirmCadDrawingSheetSelection()}>
-							导入选中图纸
-						</AlertDialogAction>
+						<AlertDialogCancel disabled={configuration.importing} onClick={() => this._cancelCadImportConfiguration()}>
+							取消
+						</AlertDialogCancel>
+						<Button disabled={configuration.importing} onClick={() => this._confirmCadImportConfiguration()}>
+							{configuration.importing ? "导入中..." : "导入"}
+						</Button>
 					</AlertDialogFooter>
 				</AlertDialogContent>
 			</AlertDialog>
@@ -1980,74 +2065,8 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	}
 
 	/**
-	 * 为普通 CAD 导入选择默认图纸候选，优先使用完整图纸，避免把同一 CAD 画布中的多个方案拆开。
-	 * @param importResult 定义已经准备好的 CAD 导入结果。
-	 */
-	private _selectDefaultCadDrawingSheetCandidate(importResult: ICadDrawingImportResult): ICadDrawingSheetCandidate {
-		const candidates = importResult.sheetCandidates;
-		if (!candidates.length) {
-			throw new Error("CAD 图纸候选分析完成，但未识别出可用图纸。");
-		}
-
-		this.props.editor.layout.console.log(
-			`[CAD 导入] 已识别 ${candidates.length} 个图纸候选：${candidates.map((candidate) => `${candidate.name}(${formatCadDrawingSheetSize(candidate)})`).join("；")}`
-		);
-
-		const fullSheet = candidates.find((candidate) => candidate.id === CAD_MODEL_FULL_SHEET_CANDIDATE_ID);
-		if (fullSheet) {
-			this.props.editor.layout.console.log("[CAD 导入] 默认使用完整图纸候选，保留 CAD 画布中的整体方案排布。");
-			return fullSheet;
-		}
-
-		const fallback = candidates[0];
-		this.props.editor.layout.console.log(`[CAD 导入] 完整图纸候选不可用，已回退到最大有效候选：${fallback.name}。`);
-		return fallback;
-	}
-
-	/**
-	 * 更新当前选中的 CAD 图纸候选。
-	 * @param candidateId 定义候选 id。
-	 */
-	private _setCadDrawingSheetSelection(candidateId: string): void {
-		this.setState((state) => ({
-			cadSheetSelection: state.cadSheetSelection
-				? {
-						...state.cadSheetSelection,
-						selectedCandidateId: candidateId,
-					}
-				: undefined,
-		}));
-	}
-
-	/**
-	 * 确认当前 CAD 图纸候选选择。
-	 */
-	private _confirmCadDrawingSheetSelection(): void {
-		const selection = this.state.cadSheetSelection;
-		if (!selection) {
-			return;
-		}
-
-		const selectedCandidate = selection.candidates.find((candidate) => candidate.id === selection.selectedCandidateId) ?? null;
-		const resolve = this._cadSheetSelectionResolve;
-		this._cadSheetSelectionResolve = null;
-		this.setState({ cadSheetSelection: undefined });
-		resolve?.(selectedCandidate);
-	}
-
-	/**
-	 * 取消 CAD 图纸候选选择。
-	 */
-	private _cancelCadDrawingSheetSelection(): void {
-		const resolve = this._cadSheetSelectionResolve;
-		this._cadSheetSelectionResolve = null;
-		this.setState({ cadSheetSelection: undefined });
-		resolve?.(null);
-	}
-
-	/**
-	 * 从工具栏选择并导入 CAD 图纸，保持 1:1 比例贴到 XZ 地面。
-	 * @param absolutePath 定义可选的 CAD 图纸绝对路径，缺省时打开文件选择器。
+	 * 打开 CAD 导入配置弹窗；工具栏、拖拽和资产入口共用该入口。
+	 * @param absolutePath 定义可选的 CAD 文件绝对路径。
 	 */
 	public async importCadDrawing(absolutePath?: string): Promise<void> {
 		if (!this.props.editor.state.projectPath) {
@@ -2055,13 +2074,53 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			return;
 		}
 
-		const sourcePath =
-			absolutePath ??
-			openSingleFileDialog({
-				title: "导入 CAD 图纸",
-				filters: [{ name: "CAD 图纸", extensions: ["dxf", "dwg"] }],
-			});
+		if (absolutePath && !isSupportedCadDrawingFile(absolutePath)) {
+			toast.error("仅支持导入 .dxf 和 .dwg CAD 图纸。");
+			return;
+		}
 
+		const sourcePath = absolutePath ? normalizeCadDrawingPath(absolutePath) : "";
+		await new Promise<boolean>((resolve) => {
+			this._cadImportConfigurationResolve?.(false);
+			this._cadImportConfigurationResolve = resolve;
+			this.setState({
+				cadImportConfiguration: {
+					sourcePath,
+					cadId: createCadImportDefaultId(sourcePath),
+					converterPath: tryGetCadDwgConverterPathFromLocalStorage(),
+					unit: createCadImportDefaultUnit(sourcePath),
+					textureLongSide: 4096,
+					alpha: 0.85,
+					drawVectorLines: true,
+					importing: false,
+				},
+			});
+		});
+	}
+
+	/**
+	 * 更新 CAD 导入配置弹窗状态。
+	 * @param patch 定义需要覆盖的配置字段。
+	 */
+	private _updateCadImportConfiguration(patch: Partial<ICadImportConfigurationState>): void {
+		this.setState((state) => ({
+			cadImportConfiguration: state.cadImportConfiguration
+				? {
+						...state.cadImportConfiguration,
+						...patch,
+					}
+				: undefined,
+		}));
+	}
+
+	/**
+	 * 通过系统文件选择器选择 CAD 源文件，并同步默认 cadId。
+	 */
+	private _chooseCadImportFile(): void {
+		const sourcePath = openSingleFileDialog({
+			title: "导入 CAD 图纸",
+			filters: [{ name: "CAD 图纸", extensions: ["dxf", "dwg"] }],
+		});
 		if (!sourcePath) {
 			return;
 		}
@@ -2072,6 +2131,110 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		}
 
 		const normalizedSourcePath = normalizeCadDrawingPath(sourcePath);
+		this.setState((state) => ({
+			cadImportConfiguration: state.cadImportConfiguration
+				? {
+						...state.cadImportConfiguration,
+						sourcePath: normalizedSourcePath,
+						cadId:
+							!state.cadImportConfiguration.cadId || /^cad_\d+$/.test(state.cadImportConfiguration.cadId)
+								? createCadImportDefaultId(normalizedSourcePath)
+								: state.cadImportConfiguration.cadId,
+						unit: createCadImportDefaultUnit(normalizedSourcePath),
+					}
+				: undefined,
+		}));
+	}
+
+	/**
+	 * 选择本机 DWG 转换器，优先推荐 ODA File Converter。
+	 */
+	private _chooseCadDwgConverterFile(): void {
+		const converterPath = openSingleFileDialog({
+			title: "选择 DWG 转换器",
+			filters: [
+				{ name: "DWG 转换器", extensions: ["exe"] },
+				{ name: "所有文件", extensions: ["*"] },
+			],
+		});
+		if (!converterPath) {
+			return;
+		}
+
+		this._updateCadImportConfiguration({ converterPath: normalizeCadDrawingPath(converterPath) });
+	}
+
+	/**
+	 * 确认 CAD 导入配置并执行导入。
+	 */
+	private async _confirmCadImportConfiguration(): Promise<void> {
+		const configuration = this.state.cadImportConfiguration;
+		if (!configuration || configuration.importing) {
+			return;
+		}
+
+		if (!configuration.sourcePath) {
+			toast.error("请选择需要导入的 CAD 图纸文件。");
+			return;
+		}
+
+		if (!isSupportedCadDrawingFile(configuration.sourcePath)) {
+			toast.error("仅支持导入 .dxf 和 .dwg CAD 图纸。");
+			return;
+		}
+
+		const safeCadId = sanitizeCadNodeName(configuration.cadId);
+		if (!safeCadId) {
+			toast.error("请填写有效的 cadId。");
+			return;
+		}
+
+		this._updateCadImportConfiguration({ importing: true, cadId: safeCadId });
+		trySetCadDwgConverterPathToLocalStorage(configuration.converterPath);
+		const completed = await this._executeCadGroundImport({
+			...configuration,
+			cadId: safeCadId,
+			sourcePath: normalizeCadDrawingPath(configuration.sourcePath),
+			converterPath: normalizeCadDrawingPath(configuration.converterPath).trim(),
+			importing: true,
+		});
+		if (completed) {
+			this._resolveCadImportConfiguration(true);
+		} else {
+			this._updateCadImportConfiguration({ importing: false });
+		}
+	}
+
+	/**
+	 * 取消 CAD 导入配置弹窗。
+	 */
+	private _cancelCadImportConfiguration(): void {
+		this._resolveCadImportConfiguration(false);
+	}
+
+	/**
+	 * 关闭 CAD 导入配置弹窗并唤醒等待方。
+	 * @param completed 定义导入是否已完成。
+	 */
+	private _resolveCadImportConfiguration(completed: boolean): void {
+		const resolve = this._cadImportConfigurationResolve;
+		this._cadImportConfigurationResolve = null;
+		this.setState({ cadImportConfiguration: undefined });
+		resolve?.(completed);
+	}
+
+	/**
+	 * 按配置执行 CAD 1:1 贴地导入。
+	 * @param configuration 定义已经确认的 CAD 导入配置。
+	 */
+	private async _executeCadGroundImport(configuration: ICadImportConfigurationState): Promise<boolean> {
+		const projectPath = this.props.editor.state.projectPath;
+		if (!projectPath) {
+			toast.error("请先打开项目后再导入 CAD 图纸。");
+			return false;
+		}
+
+		const normalizedSourcePath = normalizeCadDrawingPath(configuration.sourcePath);
 		let failed = false;
 		let importResult: ICadDrawingImportResult | null = null;
 		const consoleProgress = await this.props.editor.layout.console.progress(`正在导入 CAD 图纸：${basename(normalizedSourcePath)}`);
@@ -2085,31 +2248,36 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		try {
 			this._setCadImportProgress(normalizedSourcePath, "准备导入 CAD 图纸", 1);
 			this.props.editor.layout.console.log(`[CAD 导入] 开始导入：${normalizedSourcePath}`);
+			importResult = await prepareCadDrawingImport(projectPath, normalizedSourcePath, reportProgress, {
+				converterPath: configuration.converterPath.trim() || undefined,
+			});
 
-			importResult = await prepareCadDrawingImport(this.props.editor.state.projectPath, sourcePath, reportProgress);
-			this._setCadImportProgress(normalizedSourcePath, "确认 CAD 完整图纸", 76);
-			const selectedSheet = this._selectDefaultCadDrawingSheetCandidate(importResult);
+			this._setCadImportProgress(normalizedSourcePath, "解析 DXF 线框", 74);
+			const dxfText = await readFile(importResult.importablePath, "utf-8");
+			this._setCadImportProgress(normalizedSourcePath, "生成贴地图层", 86);
+			const result = importCadGround(this.scene, dxfText, {
+				cadId: configuration.cadId,
+				sourceFileName: basename(importResult.originalPath),
+				sourcePath: importResult.originalPath,
+				projectSourcePath: importResult.projectSourcePath,
+				projectRelativeSourcePath: importResult.projectRelativeSourcePath,
+				importablePath: importResult.importablePath,
+				projectRelativeImportablePath: importResult.projectRelativeImportablePath,
+				unit: configuration.unit,
+				textureLongSide: configuration.textureLongSide,
+				alpha: configuration.alpha,
+				drawVectorLines: configuration.drawVectorLines,
+			});
 
-			this.props.editor.layout.console.log(`[CAD 导入] 已选择默认图纸候选：${selectedSheet.name}，${formatCadDrawingSheetSize(selectedSheet)}，来源：${getCadDrawingSheetSourceLabel(selectedSheet.source)}。`);
-			this._setCadImportProgress(normalizedSourcePath, "生成完整图纸参照图片", 82);
-			const referenceImage = await createCadDxfReferenceImage(importResult.importablePath, undefined, { sheetCandidate: selectedSheet });
-			const skippedCount = referenceImage.skippedEntityCount + referenceImage.skippedLineSegmentCount + referenceImage.skippedInsertCount + referenceImage.croppedLineSegmentCount;
-			const skippedMessage = skippedCount ? `，已跳过/裁剪 ${skippedCount} 条异常或远端实体/线段` : "";
-			const insertMessage = referenceImage.expandedInsertCount ? `，已展开 ${referenceImage.expandedInsertCount} 个块引用` : "";
-			const visibleBlockMessage = referenceImage.visibleBlockDefinitionCount ? `，已识别 ${referenceImage.visibleBlockDefinitionCount} 个可见块定义` : "";
-			this.props.editor.layout.console.log(
-				`[CAD 导入] 已生成地面参照图片：${referenceImage.imagePath}，${referenceImage.pixelWidth}x${referenceImage.pixelHeight}px，世界尺寸 ${referenceImage.widthMeters.toFixed(2)} x ${referenceImage.heightMeters.toFixed(2)} 米，${referenceImage.lineSegmentCount} 条线段${insertMessage}${visibleBlockMessage}${skippedMessage}。`
-			);
-
-			this._setCadImportProgress(normalizedSourcePath, "贴合到地面原点", 90);
-			const root = this._createCadDrawingReferencePlane(referenceImage, importResult);
-			this._placeCadDrawingOnGround(root, importResult, selectedSheet);
-			await this._selectImportedCadDrawingRoot(root);
+			await this._selectImportedCadDrawingRoot(result.root);
 			this.props.editor.layout.assets.refresh();
 			this._setCadImportProgress(normalizedSourcePath, "CAD 图纸导入完成", 100);
-			this.props.editor.layout.console.log(`[CAD 导入] 已作为图片贴到场景地面原点：${root.name}，位置：${root.getAbsolutePosition().asArray().join(", ")}`);
-			consoleProgress.setState({ done: true, message: `CAD 参照图片导入完成：${basename(importResult.originalPath)}` });
-			toast.success(`已导入 CAD 参照图片 "${basename(importResult.originalPath)}"。`);
+			this.props.editor.layout.console.log(
+				`[CAD 导入] 已生成 ${result.root.name}，地面尺寸 ${result.metadata.ground.width.toFixed(3)} × ${result.metadata.ground.height.toFixed(3)} m，图层 ${result.metadata.layers.length} 个，线段 ${result.metadata.ground.lineSegmentCount} 条。`
+			);
+			consoleProgress.setState({ done: true, message: `CAD 贴地图纸导入完成：${basename(importResult.originalPath)}` });
+			toast.success(`已导入 CAD 图纸 "${basename(importResult.originalPath)}"。`);
+			return true;
 		} catch (e) {
 			failed = true;
 			console.error(e);
@@ -2118,6 +2286,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			this._logCadImportError(e, normalizedSourcePath, importResult ?? undefined);
 			consoleProgress.setState({ done: false, error: true, message: `CAD 图纸导入失败：${basename(normalizedSourcePath)}` });
 			toast.error(e instanceof Error ? e.message : "无法导入 CAD 图纸。");
+			return false;
 		} finally {
 			if (!failed) {
 				this.setState({ informationMessage: "" });
@@ -2151,138 +2320,15 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			"[CAD 导入失败]",
 			`源文件：${sourcePath}`,
 			importResult ? `项目内源文件：${importResult.projectSourcePath}` : null,
+			importResult?.projectRelativeSourcePath ? `项目相对源文件：${importResult.projectRelativeSourcePath}` : null,
 			importResult ? `导入文件：${importResult.importablePath}` : null,
+			importResult?.projectRelativeImportablePath ? `项目相对导入文件：${importResult.projectRelativeImportablePath}` : null,
 			importResult?.convertedFrom ? `转换来源：${importResult.convertedFrom}` : null,
-			importResult?.sheetCandidates.length ? `已识别候选：${importResult.sheetCandidates.map((candidate) => `${candidate.name}(${formatCadDrawingSheetSize(candidate)})`).join("；")}` : null,
 			`错误：${message}`,
 			stack ? `堆栈：\n${stack}` : null,
 		].filter(Boolean);
 
 		this.props.editor.layout.console.error(details.join("\n"));
-	}
-
-	/**
-	 * 根据 DXF 栅格化结果创建贴在 XZ 地面的 CAD 参照图片平面。
-	 * @param referenceImage 定义已经生成的 PNG 参照图片。
-	 * @param importResult 定义 CAD 图纸准备和转换结果。
-	 */
-	private _createCadDrawingReferencePlane(referenceImage: ICadDxfReferenceImageResult, importResult: ICadDrawingImportResult): ImportedModelRoot {
-		const name = basename(importResult.originalPath);
-		const ground = MeshBuilder.CreateGround(`CAD 参照图 - ${name}`, { width: referenceImage.widthMeters, height: referenceImage.heightMeters, subdivisions: 1 }, this.scene);
-		ground.position.set(0, 0, 0);
-		ground.isPickable = true;
-		ground.renderingGroupId = 1;
-
-		const texture = configureImportedTexture(
-			new Texture(
-				referenceImage.imagePath,
-				this.scene,
-				false,
-				true,
-				Texture.TRILINEAR_SAMPLINGMODE,
-				() => this.props.editor.layout.console.log(`[CAD 导入] 参照图片纹理加载完成：${referenceImage.imagePath}`),
-				(message, exception) => {
-					const details = exception instanceof Error ? exception.message : String(exception ?? message ?? "未知错误");
-					this.props.editor.layout.console.error(`[CAD 导入] 参照图片纹理加载失败：${referenceImage.imagePath}\n${details}`);
-				}
-			),
-			true,
-			referenceImage.imagePath
-		);
-		texture.hasAlpha = true;
-		texture.name ||= referenceImage.imagePath;
-
-		const material = new StandardMaterial(`CAD 参照图材质 - ${name}`, this.scene);
-		material.diffuseTexture = texture;
-		material.diffuseColor = Color3.White();
-		material.emissiveColor = Color3.White();
-		material.specularColor = Color3.Black();
-		material.useAlphaFromDiffuseTexture = true;
-		material.transparencyMode = Material.MATERIAL_ALPHABLEND;
-		material.backFaceCulling = false;
-		material.disableLighting = true;
-		material.zOffset = -2;
-		ground.material = material;
-
-		ground.metadata = {
-			cadDrawing: {
-				displayMode: "reference-image",
-				referenceImage: {
-					imagePath: referenceImage.imagePath,
-					widthMeters: referenceImage.widthMeters,
-					heightMeters: referenceImage.heightMeters,
-					pixelWidth: referenceImage.pixelWidth,
-					pixelHeight: referenceImage.pixelHeight,
-					bounds: referenceImage.bounds,
-					lineSegmentCount: referenceImage.lineSegmentCount,
-					skippedEntityCount: referenceImage.skippedEntityCount,
-					skippedLineSegmentCount: referenceImage.skippedLineSegmentCount,
-					expandedInsertCount: referenceImage.expandedInsertCount,
-					skippedInsertCount: referenceImage.skippedInsertCount,
-					visibleBlockDefinitionCount: referenceImage.visibleBlockDefinitionCount,
-					croppedLineSegmentCount: referenceImage.croppedLineSegmentCount,
-					usedRobustBounds: referenceImage.usedRobustBounds,
-				},
-			},
-		};
-
-		onTextureAddedObservable.notifyObservers(texture);
-		return ground;
-	}
-
-	/**
-	 * 将 CAD 根节点旋转到 XZ 地面、清除自动缩放影响，并把图纸水平中心贴到世界原点。
-	 * @param root 定义本次 CAD 导入的根节点。
-	 * @param importResult 定义 CAD 图纸准备和转换结果。
-	 * @param selectedSheet 定义用户选中的图纸候选。
-	 */
-	private _placeCadDrawingOnGround(root: ImportedModelRoot, importResult: ICadDrawingImportResult, selectedSheet?: ICadDrawingSheetCandidate): void {
-		root.scaling.set(1, 1, 1);
-		if (this._shouldRotateCadDrawingToGround(root)) {
-			root.rotate(Vector3.Right(), Math.PI / 2);
-		}
-		root.computeWorldMatrix(true);
-
-		const bounds = this._getImportedModelFitBounds(root);
-		if (bounds) {
-			const delta = Vector3.Zero().subtract(bounds.bottomCenter);
-			root.setAbsolutePosition(root.getAbsolutePosition().add(delta));
-		} else {
-			const position = root.getAbsolutePosition();
-			root.setAbsolutePosition(new Vector3(position.x, 0, position.z));
-		}
-
-		root.computeWorldMatrix(true);
-		root.name = basename(importResult.originalPath);
-		root.metadata ??= {};
-		root.metadata.cadDrawing = {
-			...(root.metadata.cadDrawing ?? {}),
-			...createCadDrawingMetadata(importResult, selectedSheet),
-		};
-	}
-
-	/**
-	 * 根据导入后的包围盒判断 CAD 是否仍在 XY 平面，已处于 XZ 地面时避免重复旋转成立面。
-	 * @param root 定义本次 CAD 导入的根节点。
-	 */
-	private _shouldRotateCadDrawingToGround(root: ImportedModelRoot): boolean {
-		root.computeWorldMatrix(true);
-		const bounds = this._getImportedModelFitBounds(root);
-		if (!bounds) {
-			return true;
-		}
-
-		const size = bounds.size;
-		const maxDimension = Math.max(size.x, size.y, size.z, 1);
-		const flatTolerance = maxDimension * 0.001;
-		const yIsFlat = size.y <= flatTolerance;
-		const zIsFlat = size.z <= flatTolerance;
-
-		if (yIsFlat && !zIsFlat) {
-			return false;
-		}
-
-		return true;
 	}
 
 	/**
@@ -2595,7 +2641,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	/**
 	 * 导入模型并在存在同目录外挂脚本时绑定参数脚本和动画驱动脚本。
 	 */
-	private async _importModelAsset(absolutePath: string, useCloudConverter: boolean, position?: Vector3): Promise<void> {
+	private async _importModelAsset(absolutePath: string, useCloudConverter: boolean, position?: Vector3, focusAfterImport = !position): Promise<void> {
 		const result = await this.importSceneFile(absolutePath, useCloudConverter);
 		if (!result || !this.props.editor.state.projectPath) {
 			return;
@@ -2618,7 +2664,10 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		this.props.editor.layout.inspector.setEditedObject(root);
 		this.props.editor.layout.animations.setEditedObject(root);
 		this.props.editor.layout.graph.refresh();
-		await waitNextAnimationFrame();
-		this.focusObject(root);
+		// 拖放导入已有明确鼠标落点时保持当前相机，避免相机自动聚焦造成模型视觉上偏离拖放位置。
+		if (focusAfterImport) {
+			await waitNextAnimationFrame();
+			this.focusObject(root);
+		}
 	}
 }

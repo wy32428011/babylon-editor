@@ -3,6 +3,7 @@ import { ipcRenderer } from "electron";
 
 import { Component, ReactNode } from "react";
 
+import { restoreCadGroundReferences } from "../../../project/load/cad";
 import { loadScene } from "../../../project/load/scene";
 import { tryGetSafeOpenModeFromLocalStorage } from "../../../tools/local-storage";
 import { onProjectConfigurationChangedObservable, projectConfiguration } from "../../../project/configuration";
@@ -51,6 +52,7 @@ export default class SceneEditorWindow extends Component<ISceneEditorWindowProps
 		const directory = dirname(this.props.projectPath);
 
 		await loadScene(this._editor, directory, this.props.scenePath, { safeMode });
+		await restoreCadGroundReferences(this._editor, this._editor.layout.preview.scene, directory);
 
 		this._editor.layout.graph.refresh();
 		this._editor.layout.inspector.setEditedObject(this._editor.layout.preview.scene);

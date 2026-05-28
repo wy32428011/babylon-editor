@@ -46,6 +46,7 @@ import { checkProjectCachedCompressedTextures, processingCompressedTextures } fr
 import { ICommandPaletteType } from "../dialogs/command-palette/command-palette";
 import { getMaterialCommands, getMaterialsLibraryCommands } from "../dialogs/command-palette/material";
 
+import { restoreCadGroundReferences } from "../../project/load/cad";
 import { loadScene } from "../../project/load/scene";
 import { saveProject, saveProjectConfiguration } from "../../project/save/save";
 import { ensureSceneMetadataSpace } from "../../project/space";
@@ -1558,6 +1559,7 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 		await loadScene(this.props.editor, directory, absolutePath, {
 			safeMode: this.props.editor.state.safeOpenMode,
 		});
+		await restoreCadGroundReferences(this.props.editor, this.props.editor.layout.preview.scene, directory);
 
 		await this.props.editor.layout.graph.refresh();
 

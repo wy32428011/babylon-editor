@@ -16,6 +16,7 @@ import { createEditorWindow, editorWindows } from "./editor/window";
 
 import "./electron/node-pty";
 import "./electron/events/shell";
+import "./electron/events/cad";
 import "./electron/events/dialog";
 import "./electron/events/editor";
 import "./electron/events/window";

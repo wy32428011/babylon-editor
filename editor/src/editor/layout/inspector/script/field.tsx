@@ -49,7 +49,7 @@ import { EditorInspectorStringField } from "../fields/string";
 import { EditorInspectorTextureField } from "../fields/texture";
 import { EditorInspectorSceneEntityField } from "../fields/entity";
 
-import { VisibleInInspectorDecoratorObject, computeDefaultValuesForObject, scriptValues } from "./tools";
+import { ScriptInspectorValue, VisibleInInspectorDecoratorObject, computeDefaultValuesForObject, scriptValues } from "./tools";
 
 const cachedScripts: Record<
 	string,
@@ -85,12 +85,14 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 
 	const [watcher, setWatcher] = useState<FSWatcher | null>(null);
 
-	const [updateId, setUpdateId] = useState(0); // Used to force re-render when a texture is changed
+	const [updateId, setUpdateId] = useState(0); // 用于纹理或脚本默认值变化后强制刷新字段。
 
 	useEffect(() => {
 		const output = cachedScripts[srcAbsolutePath]?.output;
 		if (output) {
-			computeDefaultValuesForObject(props.script, output);
+			computeDefaultValuesForObject(props.script, output, {
+				syncDefaultValues: isModelSidecarParametersScript(),
+			});
 			setOutput(output);
 			handleApplyModelSidecarParameters();
 		}
@@ -146,6 +148,7 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 
 		const fStat = await stat(srcAbsolutePath);
 		const cached = cachedScripts[srcAbsolutePath];
+		const previousOutput = cached?.output ?? null;
 
 		if (!cached || cached.time !== fStat.mtimeMs) {
 			const temporaryDirectory = await ensureTemporaryDirectoryExists(projectConfiguration.path);
@@ -173,12 +176,18 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 				scriptExports: undefined,
 			};
 
-			if (extractOutput) {
-				computeDefaultValuesForObject(props.script, extractOutput);
-			}
 		}
 
-		setOutput(cachedScripts[srcAbsolutePath]?.output);
+		const currentOutput = cachedScripts[srcAbsolutePath]?.output;
+		if (currentOutput) {
+			computeDefaultValuesForObject(props.script, currentOutput, {
+				previousOutput,
+				syncDefaultValues: isModelSidecarParametersScript(),
+			});
+			setUpdateId((id) => id + 1);
+		}
+
+		setOutput(currentOutput);
 		handleApplyModelSidecarParameters();
 	}
 
@@ -297,12 +306,38 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 	}
 
 	/**
+	 * 获取脚本字段保存记录，集中处理 values 缺失或字段不存在的边界。
+	 * @param propertyKey 定义脚本字段名。
+	 */
+	function getParameterValueRecord(propertyKey: string): ScriptInspectorValue | undefined {
+		return props.script[scriptValues]?.[propertyKey] as ScriptInspectorValue | undefined;
+	}
+
+	/**
+	 * 读取脚本字段的手动覆盖状态，普通脚本没有该标记时保持 undefined。
+	 * @param propertyKey 定义脚本字段名。
+	 */
+	function getParameterOverridden(propertyKey: string): boolean | undefined {
+		const value = getParameterValueRecord(propertyKey);
+		return typeof value?.overridden === "boolean" ? value.overridden : undefined;
+	}
+
+	/**
 	 * 设置脚本字段值，并保持数组、对象等复合值互不共享引用。
 	 * @param propertyKey 定义脚本字段名。
 	 * @param value 定义即将写入的字段值。
+	 * @param overridden 定义是否将该字段标记为 Inspector 手动覆盖。
 	 */
-	function setParameterValue(propertyKey: string, value: any): void {
-		props.script[scriptValues][propertyKey].value = cloneParameterValue(value);
+	function setParameterValue(propertyKey: string, value: any, overridden?: boolean): void {
+		const record = getParameterValueRecord(propertyKey);
+		if (!record) {
+			return;
+		}
+
+		record.value = cloneParameterValue(value);
+		if (overridden !== undefined) {
+			record.overridden = overridden;
+		}
 	}
 
 	/**
@@ -314,15 +349,17 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 	function registerParameterValueUndoRedo(propertyKey: string, oldValue: any, newValue: any): void {
 		const oldValueCopy = cloneParameterValue(oldValue);
 		const newValueCopy = cloneParameterValue(newValue);
+		const oldOverridden = getParameterOverridden(propertyKey);
+		const newOverridden = isModelSidecarParametersScript() ? true : oldOverridden;
 
 		registerUndoRedo({
 			executeRedo: true,
 			undo: () => {
-				setParameterValue(propertyKey, oldValueCopy);
+				setParameterValue(propertyKey, oldValueCopy, oldOverridden);
 				handleApplyModelSidecarParameters();
 			},
 			redo: () => {
-				setParameterValue(propertyKey, newValueCopy);
+				setParameterValue(propertyKey, newValueCopy, newOverridden);
 				handleApplyModelSidecarParameters();
 			},
 		});

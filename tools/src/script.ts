@@ -39,6 +39,8 @@ export interface IModelSidecarParameterValue {
 	type?: string;
 	description?: string;
 	value: unknown;
+	defaultValue?: unknown;
+	overridden?: boolean;
 }
 
 /**
