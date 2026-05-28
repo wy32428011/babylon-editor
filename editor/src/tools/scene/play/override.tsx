@@ -78,6 +78,47 @@ function normalizeUrl(url: string) {
 }
 
 /**
+ * 判断资源地址是否应该按原样交给 Babylon/Electron 处理。
+ */
+function isRuntimeUrl(url: string): boolean {
+	return /^(data|blob|https?|file):/i.test(url);
+}
+
+/**
+ * 判断相对资源地址是否需要从 Play 导出目录解析。
+ */
+function shouldResolveFromPublic(url: string): boolean {
+	return !isRuntimeUrl(url) && (!isAbsolute(url) || url.startsWith("/scene/"));
+}
+
+/**
+ * 将 Play 中的相对资源地址解析到指定导出目录。
+ */
+function resolvePlayUrl(url: string, rootUrl: string): string {
+	if (!shouldResolveFromPublic(url)) {
+		return url;
+	}
+
+	return join(rootUrl, normalizeUrl(url));
+}
+
+/**
+ * 将编辑器临时目录资源恢复到项目根目录下的真实路径。
+ */
+function resolveTemporaryEditorUrl(url: string, publicDir: string): string {
+	if (isRuntimeUrl(url)) {
+		return url;
+	}
+
+	const temporaryTextureIndex = url?.indexOf(".bjseditor") ?? -1;
+	if (temporaryTextureIndex === -1) {
+		return url;
+	}
+
+	return join(publicDir, "..", url.substring(temporaryTextureIndex));
+}
+
+/**
  * To play scene inline in the editor, we need to override some methods.
  * This function restores all the orignal methods for all object that have been overridden.
  */
@@ -181,9 +222,8 @@ export function applyOverrides(editor: Editor) {
 
 	// Fetch
 	window.fetch = async (input: string | URL | Request, init?: RequestInit) => {
-		if (!isAbsolute(input.toString())) {
-			input = normalizeUrl(input.toString());
-			input = join(publicDir, input.toString());
+		if (typeof input === "string" || input instanceof URL) {
+			input = resolvePlayUrl(input.toString(), publicDir);
 		}
 
 		return savedWindowMethods.fetch.call(window, input, init);
@@ -259,14 +299,9 @@ export function applyOverrides(editor: Editor) {
 
 	// WebRequest
 	WebRequest.prototype.open = function (method: string, url: string) {
-		if (url && !isAbsolute(url)) {
-			url = normalizeUrl(url);
-			url = join(publicDir, url);
-		}
-
-		const temporaryTextureIndex = url?.indexOf(".bjseditor") ?? -1;
-		if (temporaryTextureIndex !== -1) {
-			url = join(publicDir, "..", url.substring(temporaryTextureIndex));
+		if (url) {
+			url = resolvePlayUrl(url, publicDir);
+			url = resolveTemporaryEditorUrl(url, publicDir);
 		}
 
 		return savedWebRequestMethods.open.call(this, method, url);
@@ -274,16 +309,18 @@ export function applyOverrides(editor: Editor) {
 
 	// Engine
 	Engine.prototype.createRawCubeTextureFromUrl = (url: string, ...args: any[]) => {
-		if (url && url.includes(publicScene)) {
-			url = url.replace(publicScene, projectDir);
+		if (url) {
+			url = resolvePlayUrl(url, publicScene);
+			url = resolveTemporaryEditorUrl(url, publicDir);
 		}
 
 		return savedEngineMethods.createRawCubeTextureFromUrl.call(editor.layout.preview.engine, url, ...args);
 	};
 
 	Engine.prototype.createCubeTexture = (rootUrl: string, ...args: any[]) => {
-		if (rootUrl && rootUrl.includes(publicScene)) {
-			rootUrl = rootUrl.replace(publicScene, projectDir);
+		if (rootUrl) {
+			rootUrl = resolvePlayUrl(rootUrl, publicScene);
+			rootUrl = resolveTemporaryEditorUrl(rootUrl, publicDir);
 		}
 
 		return savedEngineMethods.createCubeTexture.call(editor.layout.preview.engine, rootUrl, ...args);
@@ -291,19 +328,8 @@ export function applyOverrides(editor: Editor) {
 
 	Engine.prototype.createTexture = (url: string, ...args: any[]) => {
 		if (url) {
-			if (!isAbsolute(url) && !url.startsWith("data:")) {
-				url = normalizeUrl(url);
-				url = join(publicScene, url);
-			}
-
-			const temporaryTextureIndex = url?.indexOf(".bjseditor") ?? -1;
-			const isExtractedTexture = url.includes("assets/editor-generated_extracted-textures");
-
-			if (temporaryTextureIndex !== -1) {
-				url = join(publicDir, "..", url.substring(temporaryTextureIndex));
-			} else if (url?.includes(publicScene) && !isExtractedTexture) {
-				url = url.replace(publicScene, projectDir);
-			}
+			url = resolvePlayUrl(url, publicScene);
+			url = resolveTemporaryEditorUrl(url, publicDir);
 		}
 
 		return savedEngineMethods.createTexture.call(editor.layout.preview.engine, url, ...args);

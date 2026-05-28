@@ -1,5 +1,10 @@
 import { ProjectType, projectsKey } from "./project";
 
+export type PlacementGridSize = "4x4" | "8x8" | "16x16";
+
+const previewPlacementGridSizeKey = "babylonjs-editor-preview-placement-grid-size";
+const placementGridSizes = new Set<PlacementGridSize>(["4x4", "8x8", "16x16"]);
+
 /**
  * Returns the list of projects that were stored in the local storage in order to display them in the dashboard.
  * Those projects are sorted by the last updated date.
@@ -106,6 +111,30 @@ export function tryGetSafeOpenModeFromLocalStorage(): boolean {
 export function trySetSafeOpenModeInLocalStorage(enabled: boolean): void {
 	try {
 		localStorage.setItem("babylonjs-editor-safe-open-mode", String(enabled));
+	} catch (e) {
+		// 静默忽略本地存储写入失败。
+	}
+}
+
+/**
+ * 读取预览辅助网格间距偏好，非法值回退为默认 4x4。
+ */
+export function tryGetPreviewPlacementGridSizeFromLocalStorage(): PlacementGridSize {
+	try {
+		const value = localStorage.getItem(previewPlacementGridSizeKey) as PlacementGridSize | null;
+		return value && placementGridSizes.has(value) ? value : "4x4";
+	} catch (e) {
+		return "4x4";
+	}
+}
+
+/**
+ * 将预览辅助网格间距偏好写入本地存储。
+ * @param size 定义需要保存的网格间距预设。
+ */
+export function trySetPreviewPlacementGridSizeInLocalStorage(size: PlacementGridSize): void {
+	try {
+		localStorage.setItem(previewPlacementGridSizeKey, size);
 	} catch (e) {
 		// 静默忽略本地存储写入失败。
 	}

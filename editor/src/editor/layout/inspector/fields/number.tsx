@@ -285,7 +285,7 @@ export function EditorInspectorNumberField(props: IEditorInspectorNumberFieldPro
 						(mouseUpListener = () => {
 							document.exitPointerLock();
 
-							if (v !== oldV && !props.noUndoRedo) {
+							if (v !== oldV) {
 								setValue(v.toFixed(digitCount));
 
 								let finalValue = v;
@@ -296,13 +296,15 @@ export function EditorInspectorNumberField(props: IEditorInspectorNumberFieldPro
 								if (!isNaN(v) && !isNaN(oldV)) {
 									const oldValue = props.asDegrees ? Tools.ToRadians(oldV) : oldV;
 
-									registerSimpleUndoRedo({
-										object: props.object,
-										property: props.property,
+									if (!props.noUndoRedo) {
+										registerSimpleUndoRedo({
+											object: props.object,
+											property: props.property,
 
-										newValue: finalValue,
-										oldValue,
-									});
+											newValue: finalValue,
+											oldValue,
+										});
+									}
 
 									setOldValue(v.toFixed(digitCount));
 

@@ -1,5 +1,5 @@
 import { ipcRenderer, webUtils } from "electron";
-import { extname, basename, join } from "path/posix";
+import { extname, basename, dirname, join } from "path/posix";
 
 import { toast } from "sonner";
 import { Component, MouseEvent, ReactNode } from "react";
@@ -8,7 +8,7 @@ import { Grid } from "react-loader-spinner";
 
 import { FaCheck } from "react-icons/fa6";
 import { IoIosStats } from "react-icons/io";
-import { LuGrid3X3, LuMove3D, LuRotate3D, LuRotateCwSquare, LuScale3D, LuSquareDashedMousePointer } from "react-icons/lu";
+import { LuChevronDown, LuFileInput, LuGrid3X3, LuMove3D, LuRotate3D, LuRotateCwSquare, LuScale3D, LuSquareDashedMousePointer } from "react-icons/lu";
 import { GiArrowCursor, GiTeapot, GiWireframeGlobe } from "react-icons/gi";
 
 import {
@@ -28,6 +28,7 @@ import {
 	Scene,
 	Vector2,
 	Vector3,
+	Vector4,
 	WebGPUEngine,
 	HavokPlugin,
 	PickingInfo,
@@ -38,8 +39,11 @@ import {
 	Color4,
 	BoundingBox,
 	MeshBuilder,
+	Material,
 	SelectionOutlineLayer,
 	ClusteredLightContainer,
+	StandardMaterial,
+	Texture,
 	Tools,
 	_GetAudioEngine,
 } from "babylonjs";
@@ -57,13 +61,20 @@ import { ToolbarRadioGroup, ToolbarRadioGroupItem } from "../../ui/shadcn/ui/too
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../ui/shadcn/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../ui/shadcn/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "../../ui/shadcn/ui/dropdown-menu";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../../ui/shadcn/ui/alert-dialog";
 
 import { Editor } from "../main";
 
 import { isVector3 } from "../../tools/guards/math";
 import { isDomTextInputFocused } from "../../tools/dom";
+import { openSingleFileDialog } from "../../tools/dialog";
 import { isNodeLocked, setNodeVisibleInGraph } from "../../tools/node/metadata";
-import { tryGetSafeOpenModeFromLocalStorage } from "../../tools/local-storage";
+import {
+	PlacementGridSize,
+	tryGetPreviewPlacementGridSizeFromLocalStorage,
+	tryGetSafeOpenModeFromLocalStorage,
+	trySetPreviewPlacementGridSizeInLocalStorage,
+} from "../../tools/local-storage";
 import { registerUndoRedo } from "../../tools/undoredo";
 import { initializeHavok } from "../../tools/physics/init";
 import { initializeRecast } from "../../tools/recast/init";
@@ -73,12 +84,22 @@ import { onTextureAddedObservable } from "../../tools/observables";
 import { getCameraFocusPositionFor } from "../../tools/camera/focus";
 import { ITweenConfiguration, Tween } from "../../tools/animation/tween";
 import { checkProjectCachedCompressedTextures } from "../../tools/assets/ktx";
+import { createCadDrawingMetadata, ICadDrawingImportResult, ICadDrawingImportProgress, isSupportedCadDrawingFile, normalizeCadDrawingPath, prepareCadDrawingImport } from "../../tools/cad/drawing";
+import { CAD_MODEL_FULL_SHEET_CANDIDATE_ID, createCadDxfReferenceImage, ICadDrawingSheetCandidate, ICadDxfReferenceImageResult } from "../../tools/cad/dxf";
 import { createSceneLink, getRootSceneLink } from "../../tools/scene/scene-link";
 import { UniqueNumber, waitNextAnimationFrame, waitUntil } from "../../tools/tools";
 import { isSprite, isSpriteManagerNode, isSpriteMapNode } from "../../tools/guards/sprites";
 import { defaultGizmoSnapPreferences, IGizmoSnapPreferences, roundGizmoSnapSteps } from "../../tools/scene/gizmo";
 import { isAbstractMesh, isAnyTransformNode, isCamera, isCollisionInstancedMesh, isCollisionMesh, isLight, isNode } from "../../tools/guards/nodes";
-import { applyModelSidecarToImport, discoverModelSidecar, isSupportedModelSidecarFile, normalizeSidecarPath, prepareExternalModelSidecarPackage } from "../../tools/model-sidecar";
+import {
+	applyModelSidecarToImport,
+	discoverModelSidecar,
+	getProjectRelativeSidecarPath,
+	isSupportedModelSidecarFile,
+	normalizeSidecarPath,
+	prepareExternalModelSidecarPackage,
+} from "../../tools/model-sidecar";
+import { findEditorImportedModelRoot, markEditorImportedModel } from "../../tools/imported-model";
 
 import { EditorCamera } from "../nodes/camera";
 
@@ -107,18 +128,32 @@ import { StatsValuesType } from "./preview/stats/types";
 import { applySoundAsset } from "./preview/import/sound";
 import { applyTextureAssetToObject } from "./preview/import/texture";
 import { applyMaterialAssetToObject } from "./preview/import/material";
-import { EditorPreviewConvertProgress } from "./preview/import/progress";
+import { EditorPreviewCadImportProgress, EditorPreviewConvertProgress } from "./preview/import/progress";
 import { loadImportedParticleSystemFile } from "./preview/import/particles";
-import { loadImportedSceneFile, tryConvertSceneFile } from "./preview/import/import";
+import { configureImportedTexture, ILoadImportedSceneFileOptions, loadImportedSceneFile, tryConvertSceneFile } from "./preview/import/import";
 
-const IMPORTED_MODEL_TARGET_MAX_DIMENSION = 200;
-const IMPORTED_MODEL_MIN_SCALE_FACTOR = 0.001;
-const IMPORTED_MODEL_MAX_SCALE_FACTOR = 1000;
+const IMPORTED_MODEL_BOUNDS_MAX_DIMENSION = 1000000000;
+const CAD_AUTO_FOCUS_MAX_DIMENSION = 10000000;
+const CAD_CAMERA_MAX_Z = 1000000000;
+const CAD_CAMERA_MAX_Z_MULTIPLIER = 8;
 const PREVIEW_GRID_NAME = "__editor_preview_placement_grid__";
 const PREVIEW_GRID_RENDER_SIZE = 100000;
-const PREVIEW_GRID_STEP = 10;
 const PREVIEW_GRID_MAJOR_STEP = 100;
 const PREVIEW_GRID_Y_OFFSET = 0.01;
+const PREVIEW_GRID_FLASH_PERIOD_MS = 1600;
+const PREVIEW_GRID_BASE_OPACITY = 0.36;
+const PREVIEW_GRID_FLASH_OPACITY = 0.62;
+const PREVIEW_GRID_BASE_MINOR_VISIBILITY = 0.28;
+const PREVIEW_GRID_FLASH_MINOR_VISIBILITY = 0.58;
+const PREVIEW_GRID_BASE_MAIN_COLOR = new Color3(0.48, 0.48, 0.48);
+const PREVIEW_GRID_FLASH_MAIN_COLOR = new Color3(0.56, 0.6, 0.62);
+const PREVIEW_GRID_BASE_LINE_COLOR = new Color3(0.72, 0.72, 0.72);
+const PREVIEW_GRID_FLASH_LINE_COLOR = new Color3(0.34, 0.86, 1);
+const PREVIEW_GRID_SIZE_OPTIONS: { label: string; value: PlacementGridSize; divisions: number }[] = [
+	{ label: "小格 25 m", value: "4x4", divisions: 4 },
+	{ label: "小格 12.5 m", value: "8x8", divisions: 8 },
+	{ label: "小格 6.25 m", value: "16x16", divisions: 16 },
+];
 
 type ImportedModelRoot = AbstractMesh | TransformNode;
 type CanvasPickEvent = Pick<MouseEvent<HTMLCanvasElement, globalThis.MouseEvent>, "currentTarget" | "clientX" | "clientY"> & {
@@ -132,6 +167,96 @@ interface IImportedModelFitBounds {
 	size: Vector3;
 	maxDimension: number;
 	bottomCenter: Vector3;
+}
+
+interface ICadDrawingSheetSelectionState {
+	sourcePath: string;
+	candidates: ICadDrawingSheetCandidate[];
+	selectedCandidateId: string;
+}
+
+/**
+ * 判断向量坐标是否全部为有限数，避免异常导入结果污染相机和贴地计算。
+ * @param vector 定义待检查的向量。
+ */
+function isFiniteVector3(vector: Vector3): boolean {
+	return Number.isFinite(vector.x) && Number.isFinite(vector.y) && Number.isFinite(vector.z);
+}
+
+/**
+ * 判断包围盒是否适合参与编辑器聚焦和贴地计算。
+ * @param minimum 定义包围盒最小点。
+ * @param maximum 定义包围盒最大点。
+ */
+function isRenderableBoundingBox(minimum: Vector3, maximum: Vector3): boolean {
+	if (!isFiniteVector3(minimum) || !isFiniteVector3(maximum)) {
+		return false;
+	}
+
+	const size = maximum.subtract(minimum);
+	const maxDimension = Math.max(size.x, size.y, size.z);
+	return isFiniteVector3(size) && Number.isFinite(maxDimension) && maxDimension >= 0 && maxDimension <= IMPORTED_MODEL_BOUNDS_MAX_DIMENSION;
+}
+
+/**
+ * 根据网格间距预设读取大格内细分数量。
+ * @param size 定义当前网格间距预设。
+ */
+function getPlacementGridDivisions(size: PlacementGridSize): number {
+	return PREVIEW_GRID_SIZE_OPTIONS.find((option) => option.value === size)?.divisions ?? 4;
+}
+
+/**
+ * 根据网格间距预设计算细格间距。
+ * @param size 定义当前网格间距预设。
+ */
+function getPlacementGridStep(size: PlacementGridSize): number {
+	return PREVIEW_GRID_MAJOR_STEP / getPlacementGridDivisions(size);
+}
+
+/**
+ * 根据网格间距预设读取 toolbar 展示标签。
+ * @param size 定义当前网格间距预设。
+ */
+function getPlacementGridSizeLabel(size: PlacementGridSize): string {
+	return PREVIEW_GRID_SIZE_OPTIONS.find((option) => option.value === size)?.label ?? "小格 25 m";
+}
+
+/**
+ * 将本机缩略图路径转换为 Electron 渲染进程可显示的 file URL。
+ * @param absolutePath 定义本机缩略图绝对路径。
+ */
+function getCadDrawingSheetThumbnailUrl(absolutePath: string): string {
+	const normalizedPath = normalizeCadDrawingPath(absolutePath).replace(/^\/+/, "");
+	const encodedPath = normalizedPath
+		.split("/")
+		.map((segment, index) => (index === 0 && /^[a-z]:$/i.test(segment) ? segment : encodeURIComponent(segment)))
+		.join("/");
+	return `file:///${encodedPath}`;
+}
+
+/**
+ * 把图纸候选来源转换为用户可读标签。
+ * @param source 定义图纸候选来源。
+ */
+function getCadDrawingSheetSourceLabel(source: ICadDrawingSheetCandidate["source"]): string {
+	switch (source) {
+		case "block":
+			return "块图纸";
+		case "cluster":
+			return "空间区域";
+		default:
+			return "完整图纸";
+	}
+}
+
+/**
+ * 格式化图纸候选真实尺寸。
+ * @param candidate 定义图纸候选。
+ */
+function formatCadDrawingSheetSize(candidate: ICadDrawingSheetCandidate): string {
+	const size = candidate.bounds.size;
+	return `${size[0].toFixed(2)} × ${size[1].toFixed(2)} m`;
 }
 
 export interface IEditorPreviewProps {
@@ -154,6 +279,8 @@ export interface IEditorPreviewState {
 	showStatsValues: boolean;
 	showSceneHelperIcons: boolean;
 	showPlacementGrid: boolean;
+	placementGridSize: PlacementGridSize;
+	cadSheetSelection?: ICadDrawingSheetSelectionState;
 	statsValues?: StatsValuesType;
 
 	playEnabled: boolean;
@@ -232,6 +359,8 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	private _lastPickedDecal: AbstractMesh | null = null;
 	private _objectUnderPointer: AbstractMesh | Sprite | null = null;
 	private _placementGrid: AbstractMesh | null = null;
+	private _placementGridControl: Vector4 = Vector4.Zero();
+	private _cadSheetSelectionResolve: ((candidate: ICadDrawingSheetCandidate | null) => void) | null = null;
 
 	private _workingCanvas: HTMLCanvasElement | null = null;
 	private _mainView: EngineView | null = null;
@@ -252,6 +381,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			showStatsValues: false,
 			showSceneHelperIcons: false,
 			showPlacementGrid: true,
+			placementGridSize: tryGetPreviewPlacementGridSizeFromLocalStorage(),
 
 			playEnabled: false,
 			playSceneLoadingProgress: 0,
@@ -329,6 +459,8 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 					<SpinnerUIComponent width="16" />
 					<div>{this.state.informationMessage}</div>
 				</div>
+
+				{this._getCadDrawingSheetSelectionDialog()}
 			</div>
 		);
 	}
@@ -571,6 +703,10 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			});
 
 			const box = mesh.getBoundingInfo().boundingBox;
+			if (!isRenderableBoundingBox(box.minimumWorld, box.maximumWorld)) {
+				return;
+			}
+
 			minimum = minimum ? Vector3.Minimize(minimum, box.minimumWorld) : box.minimumWorld.clone();
 			maximum = maximum ? Vector3.Maximize(maximum, box.maximumWorld) : box.maximumWorld.clone();
 		});
@@ -585,7 +721,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	}
 
 	/**
-	 * 识别或创建本次导入模型的整体根节点，后续自动缩放、落点和 Gizmo 都围绕它处理。
+	 * 识别或创建本次导入模型的整体根节点，后续落点贴合、选中和 Gizmo 都围绕它处理。
 	 */
 	private _getImportedModelRoot(result: ISceneLoaderAsyncResult, absolutePath: string, sidecarRoot: ImportedModelRoot | null): ImportedModelRoot | null {
 		if (sidecarRoot) {
@@ -595,7 +731,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		const ignoredNodes = [this.camera as unknown as Node, this._previewCamera as Node | null];
 		const importedNodes = [...result.transformNodes, ...result.meshes].filter((node) => !ignoredNodes.includes(node));
 		const rootNode = importedNodes.find((node) => (node.name === "__root__" || node.id === "__root__") && !node.parent);
-		if (isAnyTransformNode(rootNode) || isAbstractMesh(rootNode)) {
+		if (rootNode && (isAnyTransformNode(rootNode) || isAbstractMesh(rootNode))) {
 			return rootNode;
 		}
 
@@ -637,6 +773,10 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			});
 
 			const box = mesh.getBoundingInfo().boundingBox;
+			if (!isRenderableBoundingBox(box.minimumWorld, box.maximumWorld)) {
+				return;
+			}
+
 			minimum = minimum ? Vector3.Minimize(minimum, box.minimumWorld) : box.minimumWorld.clone();
 			maximum = maximum ? Vector3.Maximize(maximum, box.maximumWorld) : box.maximumWorld.clone();
 		});
@@ -647,6 +787,10 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 
 		const boundsMinimum = minimum as Vector3;
 		const boundsMaximum = maximum as Vector3;
+		if (!isRenderableBoundingBox(boundsMinimum, boundsMaximum)) {
+			return null;
+		}
+
 		const center = Vector3.Center(boundsMinimum, boundsMaximum);
 		const size = boundsMaximum.subtract(boundsMinimum);
 
@@ -661,32 +805,21 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	}
 
 	/**
-	 * 自动把导入模型缩放到编辑器可操作尺寸，并把底部中心对齐到鼠标命中的世界坐标。
+	 * 按真实尺寸保留导入模型，只把底部中心对齐到鼠标命中的世界坐标。
 	 */
 	private _fitImportedModelToDropPoint(root: ImportedModelRoot, position?: Vector3): void {
-		const bounds = this._getImportedModelFitBounds(root);
-		if (bounds?.maxDimension && Number.isFinite(bounds.maxDimension) && bounds.maxDimension > 0) {
-			const scaleFactor = Math.min(
-				IMPORTED_MODEL_MAX_SCALE_FACTOR,
-				Math.max(IMPORTED_MODEL_MIN_SCALE_FACTOR, IMPORTED_MODEL_TARGET_MAX_DIMENSION / bounds.maxDimension)
-			);
-
-			root.scaling.scaleInPlace(scaleFactor);
-			root.computeWorldMatrix(true);
-		}
-
 		if (!position) {
 			return;
 		}
 
-		const scaledBounds = this._getImportedModelFitBounds(root);
-		if (!scaledBounds) {
+		const bounds = this._getImportedModelFitBounds(root);
+		if (!bounds) {
 			root.setAbsolutePosition(position);
 			root.computeWorldMatrix(true);
 			return;
 		}
 
-		const delta = position.subtract(scaledBounds.bottomCenter);
+		const delta = position.subtract(bounds.bottomCenter);
 		root.setAbsolutePosition(root.getAbsolutePosition().add(delta));
 		root.computeWorldMatrix(true);
 	}
@@ -801,6 +934,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 				}
 
 				this._syncPlacementGridToCamera();
+				this._updatePlacementGridFlash();
 				this.scene.render();
 
 				if (!this.engine.activeView?.camera) {
@@ -866,14 +1000,11 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			this.scene
 		);
 		const material = new GridMaterial(`${PREVIEW_GRID_NAME}_material`, this.scene);
+		this._configurePlacementGridMaterial(material, this.state.placementGridSize);
+		material.onBindObservable.add(() => this._bindPlacementGridMaterialUniforms(material));
 
-		material.gridRatio = PREVIEW_GRID_STEP;
-		material.majorUnitFrequency = PREVIEW_GRID_MAJOR_STEP / PREVIEW_GRID_STEP;
-		material.minorUnitVisibility = 0.28;
-		material.opacity = 0.38;
-		material.mainColor = new Color3(0.48, 0.48, 0.48);
-		material.lineColor = new Color3(0.72, 0.72, 0.72);
 		material.backFaceCulling = false;
+		material.disableDepthWrite = true;
 		material.doNotSerialize = true;
 		material.metadata = {
 			...material.metadata,
@@ -900,6 +1031,20 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	}
 
 	/**
+	 * 根据当前间距预设配置预览辅助网格材质。
+	 * @param material 定义需要更新的网格材质。
+	 * @param size 定义当前网格间距预设。
+	 */
+	private _configurePlacementGridMaterial(material: GridMaterial, size: PlacementGridSize): void {
+		material.gridRatio = getPlacementGridStep(size);
+		material.majorUnitFrequency = getPlacementGridDivisions(size);
+		material.minorUnitVisibility = PREVIEW_GRID_BASE_MINOR_VISIBILITY;
+		material.opacity = PREVIEW_GRID_BASE_OPACITY;
+		material.mainColor = PREVIEW_GRID_BASE_MAIN_COLOR.clone();
+		material.lineColor = PREVIEW_GRID_BASE_LINE_COLOR.clone();
+	}
+
+	/**
 	 * 将超大网格跟随当前视口中心移动，并用材质偏移保持网格线仍对齐世界坐标。
 	 */
 	private _syncPlacementGridToCamera(): void {
@@ -914,8 +1059,9 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 
 		const cameraTarget = (camera as Camera & { target?: unknown }).target;
 		const center = isVector3(cameraTarget) ? cameraTarget : camera.position;
-		const x = Math.round(center.x / PREVIEW_GRID_STEP) * PREVIEW_GRID_STEP;
-		const z = Math.round(center.z / PREVIEW_GRID_STEP) * PREVIEW_GRID_STEP;
+		const gridStep = getPlacementGridStep(this.state.placementGridSize);
+		const x = Math.round(center.x / gridStep) * gridStep;
+		const z = Math.round(center.z / gridStep) * gridStep;
 
 		if (this._placementGrid.position.x !== x || this._placementGrid.position.y !== PREVIEW_GRID_Y_OFFSET || this._placementGrid.position.z !== z) {
 			this._placementGrid.position.set(x, PREVIEW_GRID_Y_OFFSET, z);
@@ -925,6 +1071,53 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		if (material instanceof GridMaterial && (material.gridOffset.x !== x || material.gridOffset.y !== 0 || material.gridOffset.z !== z)) {
 			material.gridOffset.set(x, 0, z);
 		}
+	}
+
+	/**
+	 * 在材质绑定时直接刷新辅助网格 uniform，避免 Babylon 材质缓存保留旧规格。
+	 * @param material 定义需要刷新的辅助网格材质。
+	 */
+	private _bindPlacementGridMaterialUniforms(material: GridMaterial): void {
+		const effect = material.getEffect();
+		if (!effect) {
+			return;
+		}
+
+		this._placementGridControl.set(material.gridRatio, Math.round(material.majorUnitFrequency), material.minorUnitVisibility, material.opacity);
+		effect.setColor3("mainColor", material.mainColor);
+		effect.setColor3("lineColor", material.lineColor);
+		effect.setVector3("gridOffset", material.gridOffset);
+		effect.setVector4("gridControl", this._placementGridControl);
+	}
+
+	/**
+	 * 让预览辅助网格产生柔和闪光，方便在大画布或暗色模型下识别当前位置。
+	 */
+	private _updatePlacementGridFlash(): void {
+		if (!this._placementGrid || this._placementGrid.isDisposed() || !this._placementGrid.isEnabled()) {
+			return;
+		}
+
+		const material = this._placementGrid.material;
+		if (!(material instanceof GridMaterial)) {
+			return;
+		}
+
+		const phase = (performance.now() % PREVIEW_GRID_FLASH_PERIOD_MS) / PREVIEW_GRID_FLASH_PERIOD_MS;
+		const pulse = (1 - Math.cos(phase * Math.PI * 2)) / 2;
+
+		material.opacity = PREVIEW_GRID_BASE_OPACITY + (PREVIEW_GRID_FLASH_OPACITY - PREVIEW_GRID_BASE_OPACITY) * pulse;
+		material.minorUnitVisibility = PREVIEW_GRID_BASE_MINOR_VISIBILITY + (PREVIEW_GRID_FLASH_MINOR_VISIBILITY - PREVIEW_GRID_BASE_MINOR_VISIBILITY) * pulse;
+		material.mainColor.copyFromFloats(
+			PREVIEW_GRID_BASE_MAIN_COLOR.r + (PREVIEW_GRID_FLASH_MAIN_COLOR.r - PREVIEW_GRID_BASE_MAIN_COLOR.r) * pulse,
+			PREVIEW_GRID_BASE_MAIN_COLOR.g + (PREVIEW_GRID_FLASH_MAIN_COLOR.g - PREVIEW_GRID_BASE_MAIN_COLOR.g) * pulse,
+			PREVIEW_GRID_BASE_MAIN_COLOR.b + (PREVIEW_GRID_FLASH_MAIN_COLOR.b - PREVIEW_GRID_BASE_MAIN_COLOR.b) * pulse
+		);
+		material.lineColor.copyFromFloats(
+			PREVIEW_GRID_BASE_LINE_COLOR.r + (PREVIEW_GRID_FLASH_LINE_COLOR.r - PREVIEW_GRID_BASE_LINE_COLOR.r) * pulse,
+			PREVIEW_GRID_BASE_LINE_COLOR.g + (PREVIEW_GRID_FLASH_LINE_COLOR.g - PREVIEW_GRID_BASE_LINE_COLOR.g) * pulse,
+			PREVIEW_GRID_BASE_LINE_COLOR.b + (PREVIEW_GRID_FLASH_LINE_COLOR.b - PREVIEW_GRID_BASE_LINE_COLOR.b) * pulse
+		);
 	}
 
 	/**
@@ -938,6 +1131,25 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		}
 
 		this.setState({ showPlacementGrid: visible });
+	}
+
+	/**
+	 * 更新预览辅助网格间距并保存为本机偏好。
+	 * @param size 定义新的网格间距预设。
+	 */
+	private _setPlacementGridSize(size: PlacementGridSize): void {
+		if (this.state.placementGridSize === size) {
+			return;
+		}
+
+		trySetPreviewPlacementGridSizeInLocalStorage(size);
+		this.setState({ placementGridSize: size }, () => {
+			const material = this._placementGrid?.material;
+			if (material instanceof GridMaterial) {
+				this._configurePlacementGridMaterial(material, size);
+				this._syncPlacementGridToCamera();
+			}
+		});
 	}
 
 	/**
@@ -1294,6 +1506,11 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			effectivePickedObject = effectivePickedObject.parent;
 		}
 
+		const importedModelRoot = findEditorImportedModelRoot(effectivePickedObject);
+		if (importedModelRoot) {
+			effectivePickedObject = importedModelRoot;
+		}
+
 		return effectivePickedObject;
 	}
 
@@ -1447,6 +1664,15 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 
 					<Tooltip>
 						<TooltipTrigger asChild>
+							<Button variant="ghost" className="px-1 py-1 w-9 h-9" aria-label="导入 CAD 图纸" title="导入 CAD 图纸" onClick={() => this.importCadDrawing()}>
+								<LuFileInput className="w-5 h-5" strokeWidth={2} />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent>导入 CAD 图纸</TooltipContent>
+					</Tooltip>
+
+					<Tooltip>
+						<TooltipTrigger asChild>
 							<Toggle
 								className={this.state.showPlacementGrid ? "!px-2 !py-2 bg-primary/20" : "!px-2 !py-2"}
 								pressed={this.state.showPlacementGrid}
@@ -1457,6 +1683,25 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 						</TooltipTrigger>
 						<TooltipContent>显示/隐藏网格</TooltipContent>
 					</Tooltip>
+
+					<DropdownMenu>
+						<DropdownMenuTrigger asChild>
+							<Button variant="ghost" className="gap-1 px-2 py-1 h-9" aria-label="选择网格间距" title="选择网格间距">
+								<span className="text-xs font-medium tabular-nums">{getPlacementGridSizeLabel(this.state.placementGridSize)}</span>
+								<LuChevronDown className="w-3 h-3" strokeWidth={2} />
+							</Button>
+						</DropdownMenuTrigger>
+						<DropdownMenuContent>
+							<DropdownMenuLabel>网格间距</DropdownMenuLabel>
+							<DropdownMenuSeparator />
+							{PREVIEW_GRID_SIZE_OPTIONS.map((option) => (
+								<DropdownMenuItem key={option.value} className="flex gap-3 items-center justify-between" onClick={() => this._setPlacementGridSize(option.value)}>
+									<span>{option.label}</span>
+									{this.state.placementGridSize === option.value && <FaCheck className="w-3 h-3" />}
+								</DropdownMenuItem>
+							))}
+						</DropdownMenuContent>
+					</DropdownMenu>
 
 					<Tooltip>
 						<TooltipTrigger asChild>
@@ -1676,7 +1921,412 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		this.setState({ activeGizmo: gizmo });
 	}
 
-	public async importSceneFile(absolutePath: string, useCloudConverter: boolean): Promise<ISceneLoaderAsyncResult | null> {
+	/**
+	 * 渲染 CAD 多图纸选择弹窗。
+	 */
+	private _getCadDrawingSheetSelectionDialog(): ReactNode {
+		const selection = this.state.cadSheetSelection;
+		if (!selection) {
+			return null;
+		}
+
+		const selectedCandidate = selection.candidates.find((candidate) => candidate.id === selection.selectedCandidateId);
+		return (
+			<AlertDialog open>
+				<AlertDialogContent className="w-[min(96vw,980px)] max-w-none">
+					<AlertDialogHeader>
+						<AlertDialogTitle>选择 CAD 图纸</AlertDialogTitle>
+						<AlertDialogDescription>已从 {basename(selection.sourcePath)} 中识别出 {selection.candidates.length} 个候选图纸，选择需要贴到地面的图纸。</AlertDialogDescription>
+					</AlertDialogHeader>
+
+					<div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 max-h-[62vh] overflow-y-auto pr-1">
+						{selection.candidates.map((candidate) => {
+							const selected = candidate.id === selection.selectedCandidateId;
+							return (
+								<button
+									key={candidate.id}
+									type="button"
+									className={`flex flex-col gap-2 rounded-md border p-2 text-left transition-colors ${selected ? "border-primary bg-primary/10" : "border-border bg-muted/20 hover:bg-muted/40"}`}
+									onClick={() => this._setCadDrawingSheetSelection(candidate.id)}
+									onDoubleClick={() => this._confirmCadDrawingSheetSelection()}
+								>
+									<div className="flex items-center justify-between gap-2">
+										<div className="font-medium truncate" title={candidate.name}>
+											{candidate.name}
+										</div>
+										<div className="shrink-0 text-xs text-muted-foreground">{getCadDrawingSheetSourceLabel(candidate.source)}</div>
+									</div>
+									<div className="flex items-center justify-center h-40 rounded bg-white/90 overflow-hidden">
+										<img alt={candidate.name} src={getCadDrawingSheetThumbnailUrl(candidate.thumbnailPath)} className="max-w-full max-h-full object-contain" />
+									</div>
+									<div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+										<span>{formatCadDrawingSheetSize(candidate)}</span>
+										<span>{candidate.entityCount} 条线段</span>
+									</div>
+								</button>
+							);
+						})}
+					</div>
+
+					<AlertDialogFooter>
+						<AlertDialogCancel onClick={() => this._cancelCadDrawingSheetSelection()}>取消</AlertDialogCancel>
+						<AlertDialogAction disabled={!selectedCandidate} onClick={() => this._confirmCadDrawingSheetSelection()}>
+							导入选中图纸
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+		);
+	}
+
+	/**
+	 * 为普通 CAD 导入选择默认图纸候选，优先使用完整图纸，避免把同一 CAD 画布中的多个方案拆开。
+	 * @param importResult 定义已经准备好的 CAD 导入结果。
+	 */
+	private _selectDefaultCadDrawingSheetCandidate(importResult: ICadDrawingImportResult): ICadDrawingSheetCandidate {
+		const candidates = importResult.sheetCandidates;
+		if (!candidates.length) {
+			throw new Error("CAD 图纸候选分析完成，但未识别出可用图纸。");
+		}
+
+		this.props.editor.layout.console.log(
+			`[CAD 导入] 已识别 ${candidates.length} 个图纸候选：${candidates.map((candidate) => `${candidate.name}(${formatCadDrawingSheetSize(candidate)})`).join("；")}`
+		);
+
+		const fullSheet = candidates.find((candidate) => candidate.id === CAD_MODEL_FULL_SHEET_CANDIDATE_ID);
+		if (fullSheet) {
+			this.props.editor.layout.console.log("[CAD 导入] 默认使用完整图纸候选，保留 CAD 画布中的整体方案排布。");
+			return fullSheet;
+		}
+
+		const fallback = candidates[0];
+		this.props.editor.layout.console.log(`[CAD 导入] 完整图纸候选不可用，已回退到最大有效候选：${fallback.name}。`);
+		return fallback;
+	}
+
+	/**
+	 * 更新当前选中的 CAD 图纸候选。
+	 * @param candidateId 定义候选 id。
+	 */
+	private _setCadDrawingSheetSelection(candidateId: string): void {
+		this.setState((state) => ({
+			cadSheetSelection: state.cadSheetSelection
+				? {
+						...state.cadSheetSelection,
+						selectedCandidateId: candidateId,
+					}
+				: undefined,
+		}));
+	}
+
+	/**
+	 * 确认当前 CAD 图纸候选选择。
+	 */
+	private _confirmCadDrawingSheetSelection(): void {
+		const selection = this.state.cadSheetSelection;
+		if (!selection) {
+			return;
+		}
+
+		const selectedCandidate = selection.candidates.find((candidate) => candidate.id === selection.selectedCandidateId) ?? null;
+		const resolve = this._cadSheetSelectionResolve;
+		this._cadSheetSelectionResolve = null;
+		this.setState({ cadSheetSelection: undefined });
+		resolve?.(selectedCandidate);
+	}
+
+	/**
+	 * 取消 CAD 图纸候选选择。
+	 */
+	private _cancelCadDrawingSheetSelection(): void {
+		const resolve = this._cadSheetSelectionResolve;
+		this._cadSheetSelectionResolve = null;
+		this.setState({ cadSheetSelection: undefined });
+		resolve?.(null);
+	}
+
+	/**
+	 * 从工具栏选择并导入 CAD 图纸，保持 1:1 比例贴到 XZ 地面。
+	 * @param absolutePath 定义可选的 CAD 图纸绝对路径，缺省时打开文件选择器。
+	 */
+	public async importCadDrawing(absolutePath?: string): Promise<void> {
+		if (!this.props.editor.state.projectPath) {
+			toast.error("请先打开项目后再导入 CAD 图纸。");
+			return;
+		}
+
+		const sourcePath =
+			absolutePath ??
+			openSingleFileDialog({
+				title: "导入 CAD 图纸",
+				filters: [{ name: "CAD 图纸", extensions: ["dxf", "dwg"] }],
+			});
+
+		if (!sourcePath) {
+			return;
+		}
+
+		if (!isSupportedCadDrawingFile(sourcePath)) {
+			toast.error("仅支持导入 .dxf 和 .dwg CAD 图纸。");
+			return;
+		}
+
+		const normalizedSourcePath = normalizeCadDrawingPath(sourcePath);
+		let failed = false;
+		let importResult: ICadDrawingImportResult | null = null;
+		const consoleProgress = await this.props.editor.layout.console.progress(`正在导入 CAD 图纸：${basename(normalizedSourcePath)}`);
+		const reportProgress = (progress: ICadDrawingImportProgress): void => {
+			this._setCadImportProgress(normalizedSourcePath, progress.message, progress.value);
+			if (progress.log) {
+				this.props.editor.layout.console.log(`[CAD 导入] ${progress.log}`);
+			}
+		};
+
+		try {
+			this._setCadImportProgress(normalizedSourcePath, "准备导入 CAD 图纸", 1);
+			this.props.editor.layout.console.log(`[CAD 导入] 开始导入：${normalizedSourcePath}`);
+
+			importResult = await prepareCadDrawingImport(this.props.editor.state.projectPath, sourcePath, reportProgress);
+			this._setCadImportProgress(normalizedSourcePath, "确认 CAD 完整图纸", 76);
+			const selectedSheet = this._selectDefaultCadDrawingSheetCandidate(importResult);
+
+			this.props.editor.layout.console.log(`[CAD 导入] 已选择默认图纸候选：${selectedSheet.name}，${formatCadDrawingSheetSize(selectedSheet)}，来源：${getCadDrawingSheetSourceLabel(selectedSheet.source)}。`);
+			this._setCadImportProgress(normalizedSourcePath, "生成完整图纸参照图片", 82);
+			const referenceImage = await createCadDxfReferenceImage(importResult.importablePath, undefined, { sheetCandidate: selectedSheet });
+			const skippedCount = referenceImage.skippedEntityCount + referenceImage.skippedLineSegmentCount + referenceImage.skippedInsertCount + referenceImage.croppedLineSegmentCount;
+			const skippedMessage = skippedCount ? `，已跳过/裁剪 ${skippedCount} 条异常或远端实体/线段` : "";
+			const insertMessage = referenceImage.expandedInsertCount ? `，已展开 ${referenceImage.expandedInsertCount} 个块引用` : "";
+			const visibleBlockMessage = referenceImage.visibleBlockDefinitionCount ? `，已识别 ${referenceImage.visibleBlockDefinitionCount} 个可见块定义` : "";
+			this.props.editor.layout.console.log(
+				`[CAD 导入] 已生成地面参照图片：${referenceImage.imagePath}，${referenceImage.pixelWidth}x${referenceImage.pixelHeight}px，世界尺寸 ${referenceImage.widthMeters.toFixed(2)} x ${referenceImage.heightMeters.toFixed(2)} 米，${referenceImage.lineSegmentCount} 条线段${insertMessage}${visibleBlockMessage}${skippedMessage}。`
+			);
+
+			this._setCadImportProgress(normalizedSourcePath, "贴合到地面原点", 90);
+			const root = this._createCadDrawingReferencePlane(referenceImage, importResult);
+			this._placeCadDrawingOnGround(root, importResult, selectedSheet);
+			await this._selectImportedCadDrawingRoot(root);
+			this.props.editor.layout.assets.refresh();
+			this._setCadImportProgress(normalizedSourcePath, "CAD 图纸导入完成", 100);
+			this.props.editor.layout.console.log(`[CAD 导入] 已作为图片贴到场景地面原点：${root.name}，位置：${root.getAbsolutePosition().asArray().join(", ")}`);
+			consoleProgress.setState({ done: true, message: `CAD 参照图片导入完成：${basename(importResult.originalPath)}` });
+			toast.success(`已导入 CAD 参照图片 "${basename(importResult.originalPath)}"。`);
+		} catch (e) {
+			failed = true;
+			console.error(e);
+			this.props.editor.layout.selectTab("console");
+			this._setCadImportProgress(normalizedSourcePath, "CAD 图纸导入失败，详情见日志", 100, true);
+			this._logCadImportError(e, normalizedSourcePath, importResult ?? undefined);
+			consoleProgress.setState({ done: false, error: true, message: `CAD 图纸导入失败：${basename(normalizedSourcePath)}` });
+			toast.error(e instanceof Error ? e.message : "无法导入 CAD 图纸。");
+		} finally {
+			if (!failed) {
+				this.setState({ informationMessage: "" });
+			}
+		}
+	}
+
+	/**
+	 * 更新 CAD 导入顶部进度条。
+	 * @param absolutePath 定义正在导入的 CAD 图纸路径。
+	 * @param message 定义当前导入阶段。
+	 * @param value 定义进度百分比。
+	 * @param error 定义当前进度是否表示失败状态。
+	 */
+	private _setCadImportProgress(absolutePath: string, message: string, value: number, error?: boolean): void {
+		this.setState({
+			informationMessage: <EditorPreviewCadImportProgress absolutePath={absolutePath} message={message} value={value} error={error} />,
+		});
+	}
+
+	/**
+	 * 将 CAD 导入失败的上下文写入编辑器 Console，方便定位无响应或转换失败原因。
+	 * @param error 定义捕获到的异常。
+	 * @param sourcePath 定义用户选择的 CAD 源文件。
+	 * @param importResult 定义已经准备出的项目内路径。
+	 */
+	private _logCadImportError(error: unknown, sourcePath: string, importResult?: ICadDrawingImportResult): void {
+		const message = error instanceof Error ? error.message : String(error);
+		const stack = error instanceof Error ? error.stack : null;
+		const details = [
+			"[CAD 导入失败]",
+			`源文件：${sourcePath}`,
+			importResult ? `项目内源文件：${importResult.projectSourcePath}` : null,
+			importResult ? `导入文件：${importResult.importablePath}` : null,
+			importResult?.convertedFrom ? `转换来源：${importResult.convertedFrom}` : null,
+			importResult?.sheetCandidates.length ? `已识别候选：${importResult.sheetCandidates.map((candidate) => `${candidate.name}(${formatCadDrawingSheetSize(candidate)})`).join("；")}` : null,
+			`错误：${message}`,
+			stack ? `堆栈：\n${stack}` : null,
+		].filter(Boolean);
+
+		this.props.editor.layout.console.error(details.join("\n"));
+	}
+
+	/**
+	 * 根据 DXF 栅格化结果创建贴在 XZ 地面的 CAD 参照图片平面。
+	 * @param referenceImage 定义已经生成的 PNG 参照图片。
+	 * @param importResult 定义 CAD 图纸准备和转换结果。
+	 */
+	private _createCadDrawingReferencePlane(referenceImage: ICadDxfReferenceImageResult, importResult: ICadDrawingImportResult): ImportedModelRoot {
+		const name = basename(importResult.originalPath);
+		const ground = MeshBuilder.CreateGround(`CAD 参照图 - ${name}`, { width: referenceImage.widthMeters, height: referenceImage.heightMeters, subdivisions: 1 }, this.scene);
+		ground.position.set(0, 0, 0);
+		ground.isPickable = true;
+		ground.renderingGroupId = 1;
+
+		const texture = configureImportedTexture(
+			new Texture(
+				referenceImage.imagePath,
+				this.scene,
+				false,
+				true,
+				Texture.TRILINEAR_SAMPLINGMODE,
+				() => this.props.editor.layout.console.log(`[CAD 导入] 参照图片纹理加载完成：${referenceImage.imagePath}`),
+				(message, exception) => {
+					const details = exception instanceof Error ? exception.message : String(exception ?? message ?? "未知错误");
+					this.props.editor.layout.console.error(`[CAD 导入] 参照图片纹理加载失败：${referenceImage.imagePath}\n${details}`);
+				}
+			),
+			true,
+			referenceImage.imagePath
+		);
+		texture.hasAlpha = true;
+		texture.name ||= referenceImage.imagePath;
+
+		const material = new StandardMaterial(`CAD 参照图材质 - ${name}`, this.scene);
+		material.diffuseTexture = texture;
+		material.diffuseColor = Color3.White();
+		material.emissiveColor = Color3.White();
+		material.specularColor = Color3.Black();
+		material.useAlphaFromDiffuseTexture = true;
+		material.transparencyMode = Material.MATERIAL_ALPHABLEND;
+		material.backFaceCulling = false;
+		material.disableLighting = true;
+		material.zOffset = -2;
+		ground.material = material;
+
+		ground.metadata = {
+			cadDrawing: {
+				displayMode: "reference-image",
+				referenceImage: {
+					imagePath: referenceImage.imagePath,
+					widthMeters: referenceImage.widthMeters,
+					heightMeters: referenceImage.heightMeters,
+					pixelWidth: referenceImage.pixelWidth,
+					pixelHeight: referenceImage.pixelHeight,
+					bounds: referenceImage.bounds,
+					lineSegmentCount: referenceImage.lineSegmentCount,
+					skippedEntityCount: referenceImage.skippedEntityCount,
+					skippedLineSegmentCount: referenceImage.skippedLineSegmentCount,
+					expandedInsertCount: referenceImage.expandedInsertCount,
+					skippedInsertCount: referenceImage.skippedInsertCount,
+					visibleBlockDefinitionCount: referenceImage.visibleBlockDefinitionCount,
+					croppedLineSegmentCount: referenceImage.croppedLineSegmentCount,
+					usedRobustBounds: referenceImage.usedRobustBounds,
+				},
+			},
+		};
+
+		onTextureAddedObservable.notifyObservers(texture);
+		return ground;
+	}
+
+	/**
+	 * 将 CAD 根节点旋转到 XZ 地面、清除自动缩放影响，并把图纸水平中心贴到世界原点。
+	 * @param root 定义本次 CAD 导入的根节点。
+	 * @param importResult 定义 CAD 图纸准备和转换结果。
+	 * @param selectedSheet 定义用户选中的图纸候选。
+	 */
+	private _placeCadDrawingOnGround(root: ImportedModelRoot, importResult: ICadDrawingImportResult, selectedSheet?: ICadDrawingSheetCandidate): void {
+		root.scaling.set(1, 1, 1);
+		if (this._shouldRotateCadDrawingToGround(root)) {
+			root.rotate(Vector3.Right(), Math.PI / 2);
+		}
+		root.computeWorldMatrix(true);
+
+		const bounds = this._getImportedModelFitBounds(root);
+		if (bounds) {
+			const delta = Vector3.Zero().subtract(bounds.bottomCenter);
+			root.setAbsolutePosition(root.getAbsolutePosition().add(delta));
+		} else {
+			const position = root.getAbsolutePosition();
+			root.setAbsolutePosition(new Vector3(position.x, 0, position.z));
+		}
+
+		root.computeWorldMatrix(true);
+		root.name = basename(importResult.originalPath);
+		root.metadata ??= {};
+		root.metadata.cadDrawing = {
+			...(root.metadata.cadDrawing ?? {}),
+			...createCadDrawingMetadata(importResult, selectedSheet),
+		};
+	}
+
+	/**
+	 * 根据导入后的包围盒判断 CAD 是否仍在 XY 平面，已处于 XZ 地面时避免重复旋转成立面。
+	 * @param root 定义本次 CAD 导入的根节点。
+	 */
+	private _shouldRotateCadDrawingToGround(root: ImportedModelRoot): boolean {
+		root.computeWorldMatrix(true);
+		const bounds = this._getImportedModelFitBounds(root);
+		if (!bounds) {
+			return true;
+		}
+
+		const size = bounds.size;
+		const maxDimension = Math.max(size.x, size.y, size.z, 1);
+		const flatTolerance = maxDimension * 0.001;
+		const yIsFlat = size.y <= flatTolerance;
+		const zIsFlat = size.z <= flatTolerance;
+
+		if (yIsFlat && !zIsFlat) {
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * 导入 CAD 后刷新编辑器面板并选中 CAD 根节点。
+	 * @param root 定义本次 CAD 导入的根节点。
+	 */
+	private async _selectImportedCadDrawingRoot(root: ImportedModelRoot): Promise<void> {
+		this.gizmo.setAttachedObject(root);
+		await this.props.editor.layout.graph.refresh();
+		this.props.editor.layout.graph.setSelectedNode(root);
+		this.props.editor.layout.inspector.setEditedObject(root);
+		this.props.editor.layout.animations.setEditedObject(root);
+		await waitNextAnimationFrame();
+		this._focusImportedCadDrawingRoot(root);
+	}
+
+	/**
+	 * CAD 图纸保持 1:1 后尺寸可能很大，聚焦前先保护相机裁剪范围和异常包围盒。
+	 * @param root 定义本次 CAD 导入的根节点。
+	 */
+	private _focusImportedCadDrawingRoot(root: ImportedModelRoot): void {
+		const bounds = this._getImportedModelFitBounds(root);
+		if (!bounds) {
+			this.props.editor.layout.console.log("[CAD 导入] CAD 已贴到地面原点，但包围盒无效，已跳过自动聚焦。");
+			return;
+		}
+
+		if (bounds.maxDimension > CAD_AUTO_FOCUS_MAX_DIMENSION) {
+			this.props.editor.layout.console.log(`[CAD 导入] CAD 已贴到地面原点，图纸尺寸 ${bounds.maxDimension.toFixed(2)} 米过大，已跳过自动聚焦以避免灰屏。`);
+			return;
+		}
+
+		const camera = this.scene.activeCamera;
+		if (camera) {
+			const nextMaxZ = Math.min(CAD_CAMERA_MAX_Z, Math.max(camera.maxZ, bounds.maxDimension * CAD_CAMERA_MAX_Z_MULTIPLIER));
+			if (Number.isFinite(nextMaxZ) && nextMaxZ > camera.maxZ) {
+				camera.maxZ = nextMaxZ;
+			}
+		}
+
+		this.focusObject(root);
+	}
+
+	public async importSceneFile(absolutePath: string, useCloudConverter: boolean, options?: ILoadImportedSceneFileOptions): Promise<ISceneLoaderAsyncResult | null> {
 		if (useCloudConverter) {
 			const extension = extname(absolutePath).toLowerCase();
 			switch (extension) {
@@ -1704,7 +2354,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		}
 
 		this.setState({ informationMessage: `Importing scene "${basename(absolutePath)}"...` });
-		const result = await loadImportedSceneFile(this.scene, absolutePath);
+		const result = await loadImportedSceneFile(this.scene, absolutePath, options);
 		this.setState({ informationMessage: "" });
 
 		return result;
@@ -1809,7 +2459,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		this.props.editor.layout.graph.refresh();
 	}
 
-	private _handleAssetsDropped(ev: React.DragEvent<HTMLCanvasElement>): void {
+	private async _handleAssetsDropped(ev: React.DragEvent<HTMLCanvasElement>): Promise<void> {
 		const absolutePaths = this.props.editor.layout.assets.state.selectedKeys;
 		const dropCoordinates = this._getDragPickCoordinates(ev);
 		const dropPoint = this._getDropPointAt(dropCoordinates);
@@ -1817,11 +2467,16 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		const dropMesh = dropPick.pickedMesh?._masterMesh ?? dropPick.pickedMesh;
 		const useCloudConverter = ev.shiftKey;
 
-		absolutePaths.forEach(async (absolutePath) => {
+		for (const absolutePath of absolutePaths) {
 			await waitNextAnimationFrame();
 
 			const extension = extname(absolutePath).toLowerCase();
 			switch (extension) {
+				case ".dxf":
+				case ".dwg":
+					await this.importCadDrawing(absolutePath);
+					break;
+
 				case ".x":
 				case ".b3d":
 				case ".dae":
@@ -1830,14 +2485,13 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 				case ".fbx":
 				case ".stl":
 				case ".lwo":
-				case ".dxf":
 				case ".obj":
 				case ".3ds":
 				case ".ms3d":
 				case ".blend":
 				case ".babylon":
 					if (!dropPoint) {
-						return;
+						continue;
 					}
 
 					await this._importModelAsset(absolutePath, useCloudConverter, dropPoint?.clone());
@@ -1858,7 +2512,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 
 				case ".scene":
 					if (!dropPoint) {
-						return;
+						continue;
 					}
 
 					createSceneLink(this.props.editor, absolutePath).then((node) => {
@@ -1892,7 +2546,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 					}
 					break;
 			}
-		});
+		}
 	}
 
 	/**
@@ -1903,26 +2557,35 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			return;
 		}
 
-		const modelFiles = Array.from(ev.dataTransfer.files)
+		const droppedFiles = Array.from(ev.dataTransfer.files)
 			.map((file) => normalizeSidecarPath(webUtils.getPathForFile(file)))
-			.filter((path) => path && isSupportedModelSidecarFile(path));
+			.filter((path) => path);
+		const cadFiles = droppedFiles.filter(isSupportedCadDrawingFile);
+		const modelFiles = droppedFiles.filter((path) => !isSupportedCadDrawingFile(path) && isSupportedModelSidecarFile(path));
 
-		if (!modelFiles.length) {
+		if (!cadFiles.length && !modelFiles.length) {
 			return;
 		}
 
-		const pickedPoint = this._getDropPoint(ev);
-		if (!pickedPoint) {
-			return;
+		for (const cadFile of cadFiles) {
+			await this.importCadDrawing(cadFile);
 		}
 
-		for (const modelFile of modelFiles) {
-			try {
-				const projectModelPath = await prepareExternalModelSidecarPackage(this.props.editor.state.projectPath, modelFile);
-				await this._importModelAsset(projectModelPath, ev.shiftKey, pickedPoint?.clone());
-			} catch (e) {
-				console.error(e);
-				toast.error(`无法导入模型包 "${basename(modelFile)}"。`);
+		if (modelFiles.length) {
+			const pickedPoint = this._getDropPoint(ev);
+			if (!pickedPoint) {
+				this.props.editor.layout.assets.refresh();
+				return;
+			}
+
+			for (const modelFile of modelFiles) {
+				try {
+					const projectModelPath = await prepareExternalModelSidecarPackage(this.props.editor.state.projectPath, modelFile);
+					await this._importModelAsset(projectModelPath, ev.shiftKey, pickedPoint?.clone());
+				} catch (e) {
+					console.error(e);
+					toast.error(`无法导入模型包 "${basename(modelFile)}"。`);
+				}
 			}
 		}
 
@@ -1940,36 +2603,16 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 
 		const sidecar = await discoverModelSidecar(this.props.editor.state.projectPath, absolutePath);
 		const sidecarRoot = sidecar ? applyModelSidecarToImport(this.scene, result, sidecar) : null;
-		const autoFitImportedModel = [".glb", ".gltf"].includes(extname(absolutePath).toLowerCase());
-
-		if (!autoFitImportedModel) {
-			if (position) {
-				if (sidecarRoot) {
-					sidecarRoot.position.addInPlace(position);
-				} else {
-					result.meshes.forEach((m) => !m.parent && m.position.addInPlace(position));
-					result.transformNodes.forEach((t) => !t.parent && t.position.addInPlace(position));
-				}
-			}
-
-			if (sidecarRoot) {
-				this.gizmo.setAttachedObject(sidecarRoot);
-				this.props.editor.layout.graph.setSelectedNode(sidecarRoot);
-				this.props.editor.layout.inspector.setEditedObject(sidecarRoot);
-				this.props.editor.layout.graph.refresh();
-				await waitNextAnimationFrame();
-				this.focusObject(sidecarRoot);
-			}
-
-			return;
-		}
-
 		const root = this._getImportedModelRoot(result, absolutePath, sidecarRoot);
 		if (!root) {
 			return;
 		}
 
 		this._fitImportedModelToDropPoint(root, position);
+
+		const projectDir = dirname(this.props.editor.state.projectPath);
+		markEditorImportedModel(root, sidecar?.modelPath ?? getProjectRelativeSidecarPath(projectDir, absolutePath));
+
 		this.gizmo.setAttachedObject(root);
 		this.props.editor.layout.graph.setSelectedNode(root);
 		this.props.editor.layout.inspector.setEditedObject(root);

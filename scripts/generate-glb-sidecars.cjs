@@ -212,8 +212,9 @@ function fileHeader(modelName, description) {
 function createParamsScript(model) {
 	const params = model.params;
 
-	return `${fileHeader(model.name, "参数外挂脚本")}import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
-import { visibleAsBoolean, visibleAsNumber, visibleAsString } from "babylonjs-editor-tools";
+	return `${fileHeader(model.name, "参数外挂脚本")}import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
+import { IModelSidecarParametersContext, visibleAsBoolean, visibleAsNumber, visibleAsString, visibleAsVector3 } from "babylonjs-editor-tools";
 
 /**
  * 管理 ${model.name} 模型在属性面板中展示的基础参数。
@@ -236,6 +237,15 @@ export default class ModelSidecarParamsComponent {
 
 \t@visibleAsString("状态节点")
 \tpublic statusNodeNames: string = ${tsString(params.statusNodeNames)};
+
+\t@visibleAsVector3("主驱动节点缩放", { step: 0.01 })
+\tpublic primaryNodeScaling: Vector3 = new Vector3(1, 1, 1);
+
+\t@visibleAsVector3("辅助驱动节点缩放", { step: 0.01 })
+\tpublic secondaryNodeScaling: Vector3 = new Vector3(1, 1, 1);
+
+\t@visibleAsVector3("状态节点缩放", { step: 0.01 })
+\tpublic statusNodeScaling: Vector3 = new Vector3(1, 1, 1);
 
 \t@visibleAsString("默认轴向")
 \tpublic motionAxis: string = ${tsString(params.motionAxis)};
@@ -280,10 +290,34 @@ export default class ModelSidecarParamsComponent {
 \tpublic constructor(public node: TransformNode) {}
 
 \t/**
-\t * 参数脚本只负责暴露可配置字段，不在启动时修改模型状态。
+\t * Inspector 修改参数或运行时加载场景时，把尺寸参数应用到模型内部部件。
+\t * @param context 定义参数应用上下文，提供后代查找与基于原始缩放的尺寸设置能力。
 \t */
-\tpublic onStart(): void {
-\t\t// 参数配置由 Inspector 保存到脚本 metadata，动画驱动脚本负责实际运行逻辑。
+\tpublic onApplyParameters(context: IModelSidecarParametersContext): void {
+\t\tthis.applyScalingToNodeNames(context, this.primaryNodeNames, this.primaryNodeScaling);
+\t\tthis.applyScalingToNodeNames(context, this.secondaryNodeNames, this.secondaryNodeScaling);
+\t\tthis.applyScalingToNodeNames(context, this.statusNodeNames, this.statusNodeScaling);
+\t}
+
+\t/**
+\t * 将指定节点名称集合应用相对原始缩放的倍率。
+\t * @param context 定义参数应用上下文。
+\t * @param nodeNames 定义逗号、分号或空白分隔的节点名称集合。
+\t * @param scaling 定义相对原始缩放的倍率。
+\t */
+\tprivate applyScalingToNodeNames(context: IModelSidecarParametersContext, nodeNames: string, scaling: Vector3): void {
+\t\tthis.parseNodeNames(nodeNames).forEach((nodeName) => context.setDescendantScaling(nodeName, scaling));
+\t}
+
+\t/**
+\t * 解析用户配置的节点名称，兼容中英文逗号、分号和空白分隔。
+\t * @param value 定义用户输入的节点名称字符串。
+\t */
+\tprivate parseNodeNames(value: string): string[] {
+\t\treturn value
+\t\t\t.split(/[,，;；\\s]+/)
+\t\t\t.map((nodeName) => nodeName.trim())
+\t\t\t.filter(Boolean);
 \t}
 }
 `;

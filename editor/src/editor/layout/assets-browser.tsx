@@ -890,6 +890,7 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 			case ".x":
 			case ".dae":
 			case ".dxf":
+			case ".dwg":
 			case ".b3d":
 			case ".stl":
 			case ".fbx":
@@ -1498,6 +1499,10 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 			case ".babylon":
 			case ".fbx":
 				return openModelViewer(this.props.editor, item.props.absolutePath);
+
+			case ".dxf":
+			case ".dwg":
+				return this.props.editor.layout.preview.importCadDrawing(item.props.absolutePath);
 
 			case ".env":
 			case ".hdr":

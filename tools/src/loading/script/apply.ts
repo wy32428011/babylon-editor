@@ -1,17 +1,24 @@
 import { Node } from "@babylonjs/core/node";
 import { Scene } from "@babylonjs/core/scene";
+import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Observer } from "@babylonjs/core/Misc/observable";
 import { PointerInfo } from "@babylonjs/core/Events/pointerEvents";
 import { KeyboardInfo } from "@babylonjs/core/Events/keyboardEvents";
 import { IParticleSystem } from "@babylonjs/core/Particles/IParticleSystem";
 
-import { IMqttDriverContext, IScript } from "../../script";
+import { IModelSidecarParameterValue, IModelSidecarParametersContext, IMqttDriverContext, IScript, ModelSidecarParametersApplyReason } from "../../script";
 
 import { applyDecorators } from "../../decorators/apply";
 
 import { isAnyParticleSystem, isNode, isScene, isSoundNode } from "../../tools/guards";
 
 import { ScriptMap } from "../loader";
+
+interface IScriptConfiguration {
+	key: string;
+	kind?: string;
+	values?: Record<string, IModelSidecarParameterValue>;
+}
 
 /**
  * @internal
@@ -32,14 +39,17 @@ export function _applyScriptsForObject(scene: Scene, object: any, scriptsMap: Sc
 		}
 
 		let result = exports;
-
 		const observers: IRegisteredScriptObservers = {};
 
 		if (exports.default) {
-			result = new exports.default(object);
+			const appliedScript = instantiateScriptWithDecorators(scene, object, script, exports, rootUrl);
+			if (!appliedScript) {
+				return;
+			}
 
-			const decoratorsResult = applyDecorators(scene, object, script, result, rootUrl);
-			Object.assign(observers, decoratorsResult?.observers ?? {});
+			result = appliedScript.instance;
+			Object.assign(observers, appliedScript.observers);
+			applyModelSidecarParametersInstance(scene, object, script, result, "runtime");
 		}
 
 		if (result.onStart) {
@@ -54,6 +64,37 @@ export function _applyScriptsForObject(scene: Scene, object: any, scriptsMap: Sc
 	});
 
 	object.metadata.scripts = undefined;
+}
+
+/**
+ * 实例化模型参数脚本并立即应用参数，供编辑器实时预览复用运行时同一套逻辑。
+ * @param scene 定义当前 Babylon 场景。
+ * @param object 定义脚本绑定的模型根对象。
+ * @param script 定义 metadata 中的脚本记录。
+ * @param exports 定义脚本编译后的模块导出。
+ * @param rootUrl 定义项目资源根路径。
+ * @param reason 定义本次应用来源。
+ */
+export function applyModelSidecarParametersToObject(
+	scene: Scene,
+	object: any,
+	script: IScriptConfiguration,
+	exports: any,
+	rootUrl: string,
+	reason: ModelSidecarParametersApplyReason
+): IScript | null {
+	const appliedScript = instantiateScriptWithDecorators(scene, object, script, exports, rootUrl);
+	if (!appliedScript) {
+		return null;
+	}
+
+	try {
+		applyModelSidecarParametersInstance(scene, object, script, appliedScript.instance, reason);
+	} finally {
+		disposeScriptObservers(appliedScript.observers);
+	}
+
+	return appliedScript.instance;
 }
 
 /**
@@ -94,6 +135,11 @@ export function applyScriptOnObject(object: any, scriptConstructor: new (...args
 	return instance;
 }
 
+interface IAppliedScript {
+	instance: IScript;
+	observers: IRegisteredScriptObservers;
+}
+
 export interface IRegisteredScript {
 	/**
 	 * Defines the key of the script. Refer to scriptMap.
@@ -117,6 +163,148 @@ export interface IRegisteredScriptObservers {
 }
 
 export const scriptsDictionary = new Map<Node | IParticleSystem | Scene, IRegisteredScript[]>();
+
+/**
+ * 创建脚本实例并注入装饰器字段值。
+ * @param scene 定义当前 Babylon 场景。
+ * @param object 定义脚本绑定对象。
+ * @param script 定义 metadata 中的脚本记录。
+ * @param exports 定义脚本模块导出。
+ * @param rootUrl 定义资源根路径。
+ */
+function instantiateScriptWithDecorators(scene: Scene, object: any, script: IScriptConfiguration, exports: any, rootUrl: string): IAppliedScript | null {
+	if (!exports.default) {
+		return null;
+	}
+
+	const instance = new exports.default(object) as IScript;
+	const decoratorsResult = applyDecorators(scene, object, script, instance, rootUrl);
+
+	return {
+		instance,
+		observers: decoratorsResult?.observers ?? {},
+	};
+}
+
+/**
+ * 调用参数脚本的实时应用入口。
+ * @param scene 定义当前 Babylon 场景。
+ * @param object 定义脚本绑定对象。
+ * @param script 定义 metadata 中的脚本记录。
+ * @param instance 定义已注入装饰器字段值的脚本实例。
+ * @param reason 定义本次应用来源。
+ */
+function applyModelSidecarParametersInstance(scene: Scene, object: any, script: IScriptConfiguration, instance: IScript, reason: ModelSidecarParametersApplyReason): void {
+	if (script.kind !== "params" || !instance.onApplyParameters) {
+		return;
+	}
+
+	try {
+		instance.onApplyParameters(createModelSidecarParametersContext(scene, object, script, reason));
+	} catch (e) {
+		console.error(`Failed to apply model sidecar parameters for script "${script.key}" on object "${object?.name ?? object?.id ?? "unknown"}".`, e);
+	}
+}
+
+/**
+ * 创建参数脚本上下文，封装后代查找和基于原始缩放的尺寸应用。
+ * @param scene 定义当前 Babylon 场景。
+ * @param object 定义模型根对象。
+ * @param script 定义 metadata 中的脚本记录。
+ * @param reason 定义本次应用来源。
+ */
+function createModelSidecarParametersContext(scene: Scene, object: any, script: IScriptConfiguration, reason: ModelSidecarParametersApplyReason): IModelSidecarParametersContext {
+	const findDescendantsByName = (name: string): any[] => {
+		return getObjectDescendants(object).filter((node) => node.name === name || node.id === name);
+	};
+
+	return {
+		object,
+		scene,
+		scriptKey: script.key,
+		values: script.values ?? {},
+		reason,
+		findDescendantsByName,
+		findDescendantByName: (name) => findDescendantsByName(name)[0] ?? null,
+		getOriginalScaling: (node) => getOriginalScaling(node),
+		setNodeScaling: (node, scaling) => setNodeScalingFromOriginal(node, scaling),
+		setDescendantScaling: (name, scaling) => {
+			findDescendantsByName(name).forEach((node) => setNodeScalingFromOriginal(node, scaling));
+		},
+	};
+}
+
+/**
+ * 移除编辑器实时应用参数时临时创建的观察者，避免参数预览产生持久事件订阅。
+ * @param observers 定义装饰器创建的观察者集合。
+ */
+function disposeScriptObservers(observers: IRegisteredScriptObservers): void {
+	observers.onStartObserver?.remove();
+	observers.onUpdateObserver?.remove();
+	observers.pointerObserver?.remove();
+	observers.keyboardObserver?.remove();
+}
+
+/**
+ * 返回模型根对象的全部后代。
+ * @param object 定义模型根对象。
+ */
+function getObjectDescendants(object: any): any[] {
+	return object.getDescendants?.(false) ?? [];
+}
+
+/**
+ * 读取或初始化节点原始缩放。
+ * @param node 定义待读取的节点。
+ */
+function getOriginalScaling(node: any): Vector3 {
+	const existingTuple = node.metadata?.editorImportedModel?.originalScaling ?? node.metadata?.modelSidecarParameters?.originalScaling;
+	if (Array.isArray(existingTuple) && existingTuple.length >= 3) {
+		return Vector3.FromArray(existingTuple);
+	}
+
+	const scaling = node.scaling?.clone?.() ?? Vector3.One();
+	const tuple = scaling.asArray() as [number, number, number];
+	node.metadata ??= {};
+	node.metadata.modelSidecarParameters = {
+		...(node.metadata.modelSidecarParameters ?? {}),
+		originalScaling: tuple,
+	};
+
+	return scaling;
+}
+
+/**
+ * 按节点原始缩放设置当前缩放，避免重复应用参数时不断累乘。
+ * @param node 定义待缩放节点。
+ * @param scaling 定义相对原始缩放的倍率。
+ */
+function setNodeScalingFromOriginal(node: any, scaling: any): void {
+	if (!node?.scaling) {
+		return;
+	}
+
+	const originalScaling = getOriginalScaling(node);
+	const scalingVector = toScalingVector(scaling);
+	node.scaling.set(originalScaling.x * scalingVector.x, originalScaling.y * scalingVector.y, originalScaling.z * scalingVector.z);
+	node.computeWorldMatrix?.(true);
+}
+
+/**
+ * 将脚本传入的 number、数组或 Vector3Like 转成缩放向量。
+ * @param scaling 定义脚本传入的缩放配置。
+ */
+function toScalingVector(scaling: any): Vector3 {
+	if (typeof scaling === "number") {
+		return new Vector3(scaling, scaling, scaling);
+	}
+
+	if (Array.isArray(scaling)) {
+		return Vector3.FromArray([scaling[0] ?? 1, scaling[1] ?? 1, scaling[2] ?? 1]);
+	}
+
+	return new Vector3(scaling?.x ?? 1, scaling?.y ?? 1, scaling?.z ?? 1);
+}
 
 export interface IMqttDriverDispatchOptions {
 	/**

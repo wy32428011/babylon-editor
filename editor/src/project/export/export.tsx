@@ -1,5 +1,7 @@
+import { isAbsolute as isNativeAbsolute } from "path";
+import { fileURLToPath } from "url";
 import { join, dirname, basename, extname } from "path/posix";
-import { readJSON, readdir, remove, writeJSON } from "fs-extra";
+import { copyFile, pathExists, readJSON, readdir, remove, writeJSON } from "fs-extra";
 
 import { RenderTargetTexture, SceneSerializer } from "babylonjs";
 
@@ -44,6 +46,221 @@ export type IExportProjectOptions = {
 };
 
 let exporting = false;
+
+const supportedExportTextureExtensions = [".jpg", ".jpeg", ".webp", ".png", ".bmp", ".env", ".dds", ".hdr", ".exr", ".3dl"];
+
+type ExportableTexture = {
+	name?: string;
+	url?: string;
+	uniqueId?: number;
+	_texture?: {
+		url?: string | null;
+	} | null;
+};
+
+/**
+ * 规范化导出贴图路径，兼容 Windows 路径和 Babylon 的运行时路径拼接。
+ */
+function normalizeExportTexturePath(path: string): string {
+	return path.replace(/\\/g, "/").replace(/^\.\//, "");
+}
+
+/**
+ * 判断贴图地址是否为远程运行时资源。
+ */
+function isRemoteTexturePath(path: string): boolean {
+	return /^https?:/i.test(path);
+}
+
+/**
+ * 判断贴图地址是否为不能直接写回 name 的临时运行时资源。
+ */
+function isTransientTexturePath(path: string): boolean {
+	return /^(data|blob):/i.test(path);
+}
+
+/**
+ * 将 file URL 转为本地文件路径。
+ */
+function getLocalPathFromFileUrl(path: string): string | null {
+	if (!path.startsWith("file:")) {
+		return null;
+	}
+
+	try {
+		return normalizeExportTexturePath(fileURLToPath(path));
+	} catch (e) {
+		return null;
+	}
+}
+
+/**
+ * 判断路径是否为本机绝对路径。
+ */
+function isLocalAbsoluteTexturePath(path: string): boolean {
+	return isNativeAbsolute(path) || /^[a-zA-Z]:\//.test(path);
+}
+
+/**
+ * 把项目中的绝对路径换算成项目根相对路径。
+ */
+function getProjectRelativeTexturePath(absolutePath: string, projectRoot: string): string | null {
+	const normalizedPath = normalizeExportTexturePath(absolutePath);
+	if (!normalizedPath.toLowerCase().startsWith(projectRoot.toLowerCase())) {
+		return null;
+	}
+
+	return normalizedPath.substring(projectRoot.length);
+}
+
+/**
+ * 去掉 Play 导出目录前缀，恢复成运行时资源相对路径。
+ */
+function normalizeProjectRelativeTexturePath(path: string): string {
+	let normalizedPath = normalizeExportTexturePath(path);
+	if (normalizedPath.startsWith("public/scene/")) {
+		normalizedPath = normalizedPath.substring("public/scene/".length);
+	}
+
+	if (normalizedPath.startsWith("scene/")) {
+		normalizedPath = normalizedPath.substring("scene/".length);
+	}
+
+	return normalizedPath;
+}
+
+/**
+ * 将不在 assets 目录中的本地贴图复制到可导出的生成资源目录。
+ */
+async function copyTextureIntoGeneratedAssets(texture: ExportableTexture, sourcePath: string, projectDir: string): Promise<string | null> {
+	if (!(await pathExists(sourcePath))) {
+		return null;
+	}
+
+	if (!supportedExportTextureExtensions.includes(extname(sourcePath).toLowerCase())) {
+		return null;
+	}
+
+	const filename = basename(sourcePath);
+	if (!filename) {
+		return null;
+	}
+
+	const textureId = texture.uniqueId ?? "texture";
+	const relativePath = join("assets", "editor-generated_exported-textures", `${textureId}_${filename}`);
+	const targetPath = join(projectDir, relativePath);
+
+	await createDirectoryIfNotExist(dirname(targetPath));
+	if (normalizeExportTexturePath(sourcePath) !== normalizeExportTexturePath(targetPath)) {
+		await copyFile(sourcePath, targetPath);
+	}
+
+	return relativePath;
+}
+
+/**
+ * 根据项目相对路径判断贴图是否可以直接被 Play 导出包加载。
+ */
+async function resolveProjectTexturePath(texture: ExportableTexture, sourcePath: string, relativePath: string, projectDir: string): Promise<string | null> {
+	const normalizedRelativePath = normalizeProjectRelativeTexturePath(relativePath);
+	if (normalizedRelativePath.startsWith("assets/")) {
+		if (await pathExists(join(projectDir, normalizedRelativePath))) {
+			return normalizedRelativePath;
+		}
+
+		return copyTextureIntoGeneratedAssets(texture, sourcePath, projectDir);
+	}
+
+	return copyTextureIntoGeneratedAssets(texture, sourcePath, projectDir);
+}
+
+/**
+ * 解析单个贴图候选路径，保证最终路径能被复制到 public/scene。
+ */
+async function resolveExportTextureCandidate(texture: ExportableTexture, candidate: string, projectDir: string, projectRoot: string): Promise<string | null> {
+	if (!candidate) {
+		return null;
+	}
+
+	if (isTransientTexturePath(candidate)) {
+		return null;
+	}
+
+	if (isRemoteTexturePath(candidate)) {
+		return candidate;
+	}
+
+	const localPathFromUrl = getLocalPathFromFileUrl(candidate);
+	const normalizedCandidate = normalizeExportTexturePath(localPathFromUrl ?? candidate);
+	if (!normalizedCandidate) {
+		return null;
+	}
+
+	if (isLocalAbsoluteTexturePath(normalizedCandidate)) {
+		const relativePath = getProjectRelativeTexturePath(normalizedCandidate, projectRoot);
+		if (relativePath) {
+			return resolveProjectTexturePath(texture, normalizedCandidate, relativePath, projectDir);
+		}
+
+		return copyTextureIntoGeneratedAssets(texture, normalizedCandidate, projectDir);
+	}
+
+	const relativePath = normalizeProjectRelativeTexturePath(normalizedCandidate);
+	if (relativePath.startsWith("assets/") && (await pathExists(join(projectDir, relativePath)))) {
+		return relativePath;
+	}
+
+	if (!relativePath.startsWith("assets/")) {
+		const assetRelativePath = join("assets", relativePath);
+		if (await pathExists(join(projectDir, assetRelativePath))) {
+			return assetRelativePath;
+		}
+	}
+
+	const absolutePath = join(projectDir, relativePath);
+	if (await pathExists(absolutePath)) {
+		return resolveProjectTexturePath(texture, absolutePath, relativePath, projectDir);
+	}
+
+	return null;
+}
+
+/**
+ * 将场景中的贴图路径规范化为 Play 导出包可访问的路径。
+ */
+async function configureTexturePathForExport(texture: ExportableTexture, projectDir: string): Promise<void> {
+	const projectRoot = normalizeExportTexturePath(join(projectDir, "/"));
+	const candidates = [texture.url, texture.name, texture._texture?.url].filter((value): value is string => typeof value === "string" && value.length > 0);
+	const checkedCandidates = new Set<string>();
+
+	for (const candidate of candidates) {
+		if (checkedCandidates.has(candidate)) {
+			continue;
+		}
+
+		checkedCandidates.add(candidate);
+
+		const resolvedPath = await resolveExportTextureCandidate(texture, candidate, projectDir, projectRoot);
+		if (resolvedPath) {
+			texture.name = resolvedPath;
+			texture.url = resolvedPath;
+			return;
+		}
+	}
+}
+
+/**
+ * 批量规范化场景贴图，避免编辑预览正常但 Play 重新加载时找不到贴图。
+ */
+async function configureTexturesPathsForExport(editor: Editor, projectDir: string): Promise<void> {
+	const textures = [...editor.layout.preview.scene.textures];
+	const environmentTexture = editor.layout.preview.scene.environmentTexture;
+	if (environmentTexture && !textures.includes(environmentTexture)) {
+		textures.push(environmentTexture);
+	}
+
+	await Promise.all(textures.map((texture) => configureTexturePathForExport(texture as ExportableTexture, projectDir)));
+}
 
 export async function exportProject(editor: Editor, options: IExportProjectOptions): Promise<void> {
 	if (exporting) {
@@ -112,6 +329,7 @@ async function _exportProject(editor: Editor, options: IExportProjectOptions): P
 	const savedGeometries: string[] = [];
 	const savedGeometryIds: string[] = [];
 
+	await configureTexturesPathsForExport(editor, projectDir);
 	storeTexturesBaseSize(scene);
 
 	scene.meshes.forEach((mesh) => (mesh.doNotSerialize = mesh.metadata?.doNotSerialize ?? false));

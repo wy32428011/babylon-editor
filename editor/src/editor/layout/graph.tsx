@@ -42,6 +42,7 @@ import { updateAllLights } from "../../tools/light/shadows";
 import { isClusteredLight } from "../../tools/light/cluster";
 import { getCollisionMeshFor } from "../../tools/mesh/collision";
 import { isNodeVisibleInGraph } from "../../tools/node/metadata";
+import { shouldHideEditorImportedModelNodeInGraph } from "../../tools/imported-model";
 import { isAdvancedDynamicTexture } from "../../tools/guards/texture";
 import { updateIblShadowsRenderPipeline } from "../../tools/light/ibl";
 import { UniqueNumber, waitNextAnimationFrame } from "../../tools/tools";
@@ -878,6 +879,10 @@ export class EditorGraph extends Component<IEditorGraphProps, IEditorGraphState>
 
 	private _parseSceneNode(node: Node, noChildren?: boolean): TreeNodeInfo | null {
 		if (!this.state.showDefaultSceneNodes && this._isDefaultSceneNode(node)) {
+			return null;
+		}
+
+		if (shouldHideEditorImportedModelNodeInGraph(node)) {
 			return null;
 		}
 

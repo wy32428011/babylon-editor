@@ -64,7 +64,7 @@ export class EditorPreviewGizmoSettings extends Component<IEditorPreviewGizmoSet
 				<PopoverContent align="start" side="bottom" className="w-auto max-w-none min-w-[20rem] p-4">
 					<div className="flex flex-col gap-3">
 						{this._getSnapFieldComponent({
-							title: "Translation",
+							title: "平移 (m)",
 							property: "translationStep",
 							enabled: snap.translationEnabled,
 							icon: <LuMove3D className="h-4 w-4" />,
@@ -82,7 +82,7 @@ export class EditorPreviewGizmoSettings extends Component<IEditorPreviewGizmoSet
 						})}
 
 						{this._getSnapFieldComponent({
-							title: "缩放",
+							title: "缩放 (倍)",
 							property: "scaleStep",
 							enabled: snap.scaleEnabled,
 							icon: <LuScale3D className="h-4 w-4" />,

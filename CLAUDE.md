@@ -176,6 +176,11 @@ node ./scripts/localize-babylon-editors.mjs --config ./scripts/localize-babylon-
 
 README 记录的模型外挂脚本是当前维护重点之一：
 
+- 编辑器统一约定 `1 Babylon 世界单位 = 1 m`，`scaling` 始终是无量纲倍率，不表示米。
+- 新建和保存项目时要保留 `project.bjseditor.space` 与场景 `metadata.space = { worldUnit: "m", metersPerUnit: 1 }`；旧项目缺失该字段时只补默认值，不自动缩放旧场景数据。
+- 导入 GLB/GLTF/OBJ 等模型时默认保留真实尺寸和原始缩放，只做落点贴合、选中和聚焦；不要恢复按 100 或最大 200 unit 的自动适配缩放。
+- 预览网格、Gizmo 平移吸附、阵列间距、相机距离、灯光范围、物理重力和粒子空间偏移都按米制理解；模板默认重力应使用 `-9.81`。
+
 - 模型同目录参数脚本命名为 `模型名.params.ts` 或 `模型名.params.tsx`。
 - 动画驱动脚本命名为 `模型名.anim.动画名.ts` 或 `模型名.anim.动画名.tsx`。
 - 同时存在 `.ts` 与 `.tsx` 时优先 `.ts`。

@@ -51,7 +51,7 @@ node ./scripts/localize-babylon-editors.mjs --config ./scripts/localize-babylon-
 
 预览工具栏在普通“位置”“旋转”之外提供“平面移动”和“平面旋转”模式，用于工业模型或设备布置时减少误触 Y 轴导致的高度、俯仰或翻滚变化。平面移动只保留 XZ 水平面拖拽，Y 高度保持不变；平面旋转只保留绕 Y 轴的水平旋转环。该模式只影响编辑器当前的 Gizmo 操作入口，不改变节点坐标系、单位约定、场景保存结构或运行时逻辑。
 
-预览工具栏提供“显示/隐藏网格”按钮，默认显示 XZ 水平面辅助网格，用于摆放模型时对齐位置和间距。网格会跟随当前视口中心延伸，避免在远距离摆放时出现固定边界。该网格是编辑器运行时辅助层，不保存到项目文件、不进入层级图，也不参与场景拾取、渲染导出或运行时逻辑；关闭按钮后只隐藏辅助线，不会修改场景节点。
+预览工具栏提供“显示/隐藏网格”按钮，默认显示 XZ 水平面辅助网格，用于摆放模型时对齐位置和间距。网格支持 `4×4`、`8×8`、`16×16` 三种本机偏好值，对应显示为“小格 25 m / 12.5 m / 6.25 m”；切换后会立即刷新可视网格间距并写入本机 localStorage，下次打开编辑器保持上次选择。网格会跟随当前视口中心延伸，避免在远距离摆放时出现固定边界；网格线会保持柔和闪光，方便在大画布、暗色模型或远距离视角下识别当前位置。该网格是编辑器运行时辅助层，不保存到项目文件、不进入层级图，也不参与场景拾取、渲染导出或运行时逻辑；关闭按钮后只隐藏辅助线，不会修改场景节点。
 
 ## 模型外挂脚本
 
@@ -75,19 +75,79 @@ assets/car/
 
 可以从资产浏览器把项目内模型拖入画布，也可以从系统文件管理器拖入外部模型。外部模型会把模型所在文件夹复制到项目 `assets/模型名/` 下，确保 `.gltf/.obj` 的贴图、`.bin/.mtl` 和外挂脚本保持在同一模型包内。
 
-拖入 GLB/GLTF 到场景画布时，编辑器会在不修改原始模型文件的前提下，自动把本次导入的模型实例缩放到适合编辑的大小。若鼠标拖放位置命中了场景中的地面或已有模型，导入模型的底部中心会落到该命中点；若拖到空白区域，则使用当前鼠标射线与 XZ 水平面交点作为落点，使模型落在可视网格对应位置。导入后仍可在右侧“变换”面板或画布 Gizmo 中继续精确调整位置、旋转和缩放。若模型在所有软件中都存在原点偏移、朝向错误或真实比例异常，仍建议回到 Blender 等建模工具修正源模型后重新导出。
+拖入 GLB/GLTF/OBJ 等模型到场景画布时，编辑器会保留模型实例的真实世界尺寸和原始 `scaling`，不会为了适配编辑视口自动放大或缩小。若鼠标拖放位置命中了场景中的地面或已有模型，导入模型的底部中心会落到该命中点；若拖到空白区域，则使用当前鼠标射线与 XZ 水平面交点作为落点，使模型落在可视网格对应位置。导入后仍可在右侧“变换”面板或画布 Gizmo 中继续精确调整位置、旋转和缩放。若模型在所有软件中都存在原点偏移、朝向错误或真实比例异常，仍建议回到 Blender 等建模工具修正源模型后重新导出。
+
+导入 GLB/GLTF/OBJ 等模型时，编辑器会把模型内记录的同目录相对贴图路径统一换算为项目根相对路径，例如 `textures/base.png` 会保存为 `assets/模型目录/textures/base.png`。这样编辑预览和 Play 模式都会通过同一项目资源路径解析贴图，避免预览中已加载成功、Play 重新从 `public/scene` 加载时找不到贴图而出现黑色或粉色材质。
+
+所有通过模型导入链路拖入场景的模型，Graph 默认只显示一个整体根节点，不展开显示内部 `Mesh` 或 `TransformNode` 部件节点。内部节点仍保留在真实 Babylon 场景层级中，会继续参与渲染、保存、导出、动画和脚本按名称查找。画布中点击模型任意内部部件时，编辑器会自动上溯选中该导入模型根节点，因此右侧属性面板会稳定显示整体变换和模型外挂脚本配置。
+
+预览工具栏提供“导入 CAD 图纸”入口，支持 `.dxf` 和 `.dwg`；也可以从系统文件管理器直接把 CAD 文件拖到预览画布，或在资产浏览器中双击/右键选择“导入 CAD 图纸”。项目外 `.dxf` 会复制到项目 `assets/cad-drawings/` 后解析为二维线框，再栅格化生成同目录 `.reference.png` 参照图片；项目内 `.dxf` 会直接复用并在同目录生成参照图片。`.dwg` 会先自动探测商用免费插件：可随编辑器放置到 `bin/cad/` 的 LibreDWG/libdxfrw `dwg2dxf` 或 LibreDWG `dwgread`，也会尝试调用 PATH 中的 `dwg2dxf` 和 `dwgread`，转换成 DXF 后再生成 PNG 参照图。编辑器不再自动安装或默认使用 ODA File Converter；LibreDWG/libdxfrw 可免费商用，但采用 GPL 授权，若随应用分发需要遵守对应 GPL 源码和许可证义务。CAD 导入默认 `1 图纸单位 = 1 米`，与 Babylon `1 世界单位 = 1 m` 的约定一致；最终会创建一张带透明纸底的图片平面贴在 XZ 地面，图片平面的世界尺寸按 CAD 有效参照范围 1:1 创建，图纸中心贴到场景地面原点 `(0, 0, 0)` 后作为布置参照。导入过程中顶部会显示分阶段进度条，编辑器 Console 会记录源文件、项目内路径、自动尝试的转换命令、参照图片路径、退出码和失败堆栈，便于排查无响应或转换失败。
+
+#### DWG 转 DXF 插件下载与配置
+
+当前 DWG 转 DXF 只使用商用免费但带 GPL 义务的 LibreDWG/libdxfrw 工具，不使用需要额外商业授权边界的 ODA File Converter。LibreDWG 使用 GPLv3 or later，libdxfrw 使用 GPLv2 or later；商用项目可以使用，但如果随产品分发对应可执行文件或库，需要同步遵守对应 GPL 许可证的源码、版权声明和再分发义务。可选下载入口：
+
+- LibreDWG 官方说明与授权：[https://www.gnu.org/software/libredwg/](https://www.gnu.org/software/libredwg/)
+- LibreDWG 源码发布包：[https://ftp.gnu.org/gnu/libredwg/](https://ftp.gnu.org/gnu/libredwg/)
+- LibreDWG Windows 预编译包：[https://github.com/LibreDWG/libredwg/releases](https://github.com/LibreDWG/libredwg/releases)
+- libdxfrw 授权说明：[https://docs.librecad.org/en/latest/appx/licenses.html](https://docs.librecad.org/en/latest/appx/licenses.html)
+- libdxfrw 源码仓库：[https://github.com/LibreCAD/libdxfrw](https://github.com/LibreCAD/libdxfrw)
+- Windows 下也可通过 MSYS2 获取或构建相关工具，入口：[https://www.msys2.org/](https://www.msys2.org/)
+
+推荐配置方式是在编辑器目录下放置本地插件，不污染系统 PATH：
+
+```text
+bin/
+  cad/
+    dwgread.exe
+    dwg2dxf.exe
+    *.dll
+```
+
+Windows 预编译包通常需要下载 release assets 中的 Windows 压缩包，解压后把 `dwgread.exe` 或 `dwg2dxf.exe` 以及同目录依赖的 `.dll` 一起放入 `bin/cad/`。开发环境可放在仓库根目录的 `bin/cad/`；打包后的 Electron 应用可放在安装目录的 `resources/bin/cad/` 或 `resources/app.asar.unpacked/bin/cad/`。如果不想复制文件，也可以把包含 `dwgread.exe` 或 `dwg2dxf.exe` 的目录加入系统 `PATH`，或设置环境变量 `BABYLONJS_EDITOR_CAD_CONVERTER_DIR` 指向该目录。编辑器会优先用 `dwg2dxf --as r2000 -y -o <输出DXF> <输入DWG>` 生成 DXF R2000，以提高后续 Babylon/Assimp 导入的兼容性；如果该命令失败，会继续尝试通用 `dwg2dxf` 和 `dwgread -O DXF` 兜底。
+
+配置完成后重新导入 `.dwg` 即可。转换后的 DXF 会交给内置 DXF 解析器读取 `LINE`、`POLYLINE`、`LWPOLYLINE`、`CIRCLE`、`ARC`、`ELLIPSE` 和 `SPLINE` 等二维线框实体，并递归展开 `INSERT` 块引用后栅格化为 PNG 图片贴到地面原点；如果一个 DWG/DXF 画布中像 CAD 截图那样上下排布了多个方案，普通“导入 CAD 图纸”会默认使用“完整图纸”候选，把当前 CAD 画布中的整体可见排布作为一张参照图 1:1 贴到地面，不会自动把方案一、方案二拆开导入。解析器仍会识别未被其他块引用的可见 `BLOCKS` 和空间区域作为内部候选；这些候选只用于完整图纸不可用时的兜底和后续局部导入扩展，不作为普通导入的默认行为。实际采用的候选会记录到 `metadata.cadDrawing.selectedSheet`，保存并重新打开项目后仍可追溯。该路径用于生成布置参照图，文字、填充、标注和复杂块属性不保证完整还原。部分 DWG 转换器会在 DXF 中输出 `1E+20`、`1E+187` 这类异常坐标、坏圆弧或远端块定义，内置解析器会跳过这些异常实体/线段，并在参照图生成阶段对少量远端元素做鲁棒裁剪，避免异常包围盒把图片压成大片空白或把相机和贴地计算拉爆成灰屏；跳过、裁剪、展开块引用和可见块定义数量会记录在 Console。若导入失败，编辑器 Console 会列出实际尝试的 `dwgread`/`dwg2dxf` 命令、工作目录、退出码、参照图片生成错误、纹理加载错误和堆栈；如果日志仍是 `spawn dwgread ENOENT` 或 `spawn dwg2dxf ENOENT`，说明编辑器没有在 `bin/cad/`、`BABYLONJS_EDITOR_CAD_CONVERTER_DIR` 或 `PATH` 中找到对应可执行文件。
+
+Play 模式会先把当前场景导出到项目 `public/scene` 目录，再从该导出目录重新加载运行时场景。导出前会统一校正场景贴图的 `name/url`，将项目内贴图指向 `assets/...`，并把仍停留在项目外或非 `assets` 目录的本地贴图复制到 `assets/editor-generated_exported-textures/`，确保导出的 `.babylon` 文件引用的贴图能在 Play 模式下被找到。导出的 `.babylon` 会保留 `metadata.space = { "worldUnit": "m", "metersPerUnit": 1 }`，Play 和模板运行时不做额外单位换算。
 
 ### 模型阵列
 
-在 Graph 中右键选中模型根节点或单个网格，可以使用“创建阵列...”一次性生成线性或网格阵列。线性阵列使用总数量和 XYZ 间距连续偏移；网格阵列使用 X/Y/Z 三个方向的数量和间距生成规则排布。确认后生成的阵列节点会作为普通场景节点保存，后续可继续用变换面板、Gizmo、Graph 和撤销/重做进行编辑。
+在 Graph 中右键选中模型根节点或单个网格，可以使用“创建阵列...”一次性生成线性或网格阵列。线性阵列使用总数量和 XYZ 间距连续偏移，间距按米理解；网格阵列使用 X/Y/Z 三个方向的数量和米制间距生成规则排布。确认后生成的阵列节点会作为普通场景节点保存，后续可继续用变换面板、Gizmo、Graph 和撤销/重做进行编辑。
 
 阵列支持“实例”和“克隆”两种模式。实例模式会复用源网格的几何体和材质，适合大量重复设备、货架、管线和装饰模型；从 GLB 导入的多网格模型会为每个阵列元素创建一个容器节点，并对模型层级中的实际 Mesh 创建实例。克隆模式会创建普通副本，适合需要单独调整副本材质、骨骼或脚本的场景。大量阵列会增加 Graph 刷新和运行时渲染压力，单次阵列数量被限制为 1000 个以内。
 
 导入后，右侧属性面板会出现“模型外挂脚本”区域：
 
 - 参数脚本复用现有脚本装饰器，例如 `@visibleAsNumber`、`@visibleAsString`，字段会显示在属性面板中。
+- 参数脚本可实现 `onApplyParameters(context)`，字段在 Inspector 中变更后会立即调用该方法；保存、重开和 Play/导出运行时也会复用同一入口应用米制尺寸参数。
 - 如果存在多个动画驱动脚本，可在属性面板中选择当前启用的动画脚本。
 - 选择结果会保存到模型根节点的 `metadata.modelSidecar.selectedAnimationKey`，并同步 `metadata.scripts` 中动画脚本的启用状态。
+
+`onApplyParameters(context)` 的 `context` 提供当前模型根节点、场景、脚本 key、字段值，以及按名称查找后代、读取原始缩放和按原始缩放设置尺寸的 helper。推荐用 `context.setDescendantScaling(...)` 修改内部部件缩放，这样重复编辑参数时不会发生累乘。
+
+```ts
+import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { IModelSidecarParametersContext, visibleAsString, visibleAsVector3 } from "babylonjs-editor-tools";
+
+export default class ConveyorParams {
+	@visibleAsString("辊筒节点")
+	public rollerNodeNames: string = "GT1,GT2,GT3";
+
+	@visibleAsVector3("辊筒缩放", { step: 0.01 })
+	public rollerScaling: Vector3 = new Vector3(1, 1, 1);
+
+	/**
+	 * 将 Inspector 参数实时应用到模型内部部件。
+	 * @param context 定义参数应用上下文。
+	 */
+	public onApplyParameters(context: IModelSidecarParametersContext): void {
+		this.rollerNodeNames
+			.split(/[,，;；\s]+/)
+			.filter(Boolean)
+			.forEach((nodeName) => context.setDescendantScaling(nodeName, this.rollerScaling));
+	}
+}
+```
 
 动画驱动脚本通过 `onMqttValue` 接收外部实时值。当前版本只提供驱动入口，不内置 MQTT 连接、订阅和 broker 配置。后续接入 MQTT 客户端时，收到消息后调用 `dispatchMqttValueToObject` 即可把值分发给当前选中的动画驱动脚本。
 

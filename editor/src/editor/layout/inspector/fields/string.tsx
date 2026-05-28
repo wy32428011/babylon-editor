@@ -12,6 +12,7 @@ import { IEditorInspectorFieldProps } from "./field";
 export interface IEditorInspectorStringFieldProps extends IEditorInspectorFieldProps {
 	multiline?: boolean;
 	onChange?: (value: string) => void;
+	onFinishChange?: (value: string, oldValue: string) => void;
 }
 
 export function EditorInspectorStringField(props: IEditorInspectorStringFieldProps) {
@@ -31,15 +32,18 @@ export function EditorInspectorStringField(props: IEditorInspectorStringFieldPro
 	}
 
 	function handleBlur(newValue: string) {
-		if (newValue !== oldValue && !props.noUndoRedo) {
-			registerSimpleUndoRedo({
-				object: props.object,
-				property: props.property,
+		if (newValue !== oldValue) {
+			if (!props.noUndoRedo) {
+				registerSimpleUndoRedo({
+					object: props.object,
+					property: props.property,
 
-				oldValue,
-				newValue: value,
-			});
+					oldValue,
+					newValue: value,
+				});
+			}
 
+			props.onFinishChange?.(newValue, oldValue);
 			setOldValue(newValue);
 		}
 	}

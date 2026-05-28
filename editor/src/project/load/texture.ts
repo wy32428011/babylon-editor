@@ -1,5 +1,5 @@
 import { pathExistsSync } from "fs-extra";
-import { join, dirname, extname, resolve } from "path/posix";
+import { join, dirname, extname } from "path/posix";
 
 import { Engine, Scene, SerializationHelper, BaseTexture } from "babylonjs";
 
@@ -15,20 +15,12 @@ import { projectConfiguration } from "../configuration";
 
 const originalTextureParser = SerializationHelper._TextureParser;
 
-function textureParser(editor: Editor, source: any, scene: Scene, rootUrl: string): BaseTexture | null {
+function textureParser(_editor: Editor, source: any, scene: Scene, rootUrl: string): BaseTexture | null {
 	const engine = scene.getEngine();
 
 	const name = source.name;
 	const extension = extname(name).toLowerCase();
-
-	const play = editor.layout.preview.play;
-	if (play.state.loading) {
-		// Re-write rootUrl to exclude public/scene in order to
-		// reuse already loaded textures and save video memory.
-		if (!source.url?.includes("assets/editor-generated_extracted-textures")) {
-			rootUrl = join(resolve(rootUrl, "../../"), "/");
-		}
-	}
+	// Play 模式必须保留 rootUrl 指向 public/scene，确保加载的是导出包资源。
 
 	const assetsCache = loadSavedAssetsCache();
 	if (source.name && assetsCache[source.name]) {

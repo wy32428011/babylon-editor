@@ -1,4 +1,5 @@
 import { isAbsolute } from "path";
+import { fileURLToPath } from "url";
 import { join, dirname, basename } from "path/posix";
 import { pathExists, readFile, readJSON, writeFile } from "fs-extra";
 
@@ -33,6 +34,82 @@ import { onNodesAddedObservable, onTextureAddedObservable } from "../../../../to
 
 import { projectConfiguration } from "../../../../project/configuration";
 
+/**
+ * 规范化导入贴图路径，保证 Windows 路径也能参与项目相对路径计算。
+ */
+function normalizeImportedTexturePath(path: string): string {
+	return path.replace(/\\/g, "/");
+}
+
+/**
+ * 将 file URL 转成本地文件路径，无法解析时返回空值。
+ */
+function getLocalPathFromFileUrl(path: string): string | null {
+	if (!path.startsWith("file:")) {
+		return null;
+	}
+
+	try {
+		return normalizeImportedTexturePath(fileURLToPath(path));
+	} catch (e) {
+		return null;
+	}
+}
+
+/**
+ * 判断贴图路径是否属于运行时 URL，不能改写为项目相对路径。
+ */
+function isRuntimeOnlyTexturePath(path: string): boolean {
+	return path.startsWith("data:") || path.startsWith("blob:") || path.startsWith("http://") || path.startsWith("https://");
+}
+
+/**
+ * 把项目内绝对路径转换为项目根相对路径。
+ */
+function getProjectRelativeTexturePath(absolutePath: string, projectRoot: string): string | null {
+	const normalizedAbsolutePath = normalizeImportedTexturePath(absolutePath);
+	if (!normalizedAbsolutePath.toLowerCase().startsWith(projectRoot.toLowerCase())) {
+		return null;
+	}
+
+	return normalizedAbsolutePath.substring(projectRoot.length);
+}
+
+/**
+ * 解析导入模型中的贴图路径，兼容绝对路径和模型文件所在目录的相对路径。
+ */
+function getImportedTextureProjectRelativePath(texturePath: string, importedAssetPath?: string): string | null {
+	if (!projectConfiguration.path || !texturePath || isRuntimeOnlyTexturePath(texturePath)) {
+		return null;
+	}
+
+	const projectDir = dirname(projectConfiguration.path);
+	const projectRoot = normalizeImportedTexturePath(join(projectDir, "/"));
+	const textureLocalPath = getLocalPathFromFileUrl(texturePath);
+	let normalizedTexturePath = normalizeImportedTexturePath(textureLocalPath ?? texturePath);
+
+	if (normalizedTexturePath.startsWith("./")) {
+		normalizedTexturePath = normalizedTexturePath.substring(2);
+	}
+
+	if (isAbsolute(normalizedTexturePath)) {
+		return getProjectRelativeTexturePath(normalizedTexturePath, projectRoot);
+	}
+
+	if (normalizedTexturePath === "assets" || normalizedTexturePath.startsWith("assets/")) {
+		return normalizedTexturePath;
+	}
+
+	if (!importedAssetPath) {
+		return null;
+	}
+
+	// GLTF/OBJ 等模型常把贴图写成模型文件旁的相对路径，这里统一改成项目根相对路径供保存和 Play 导出使用。
+	const importedLocalPath = normalizeImportedTexturePath(getLocalPathFromFileUrl(importedAssetPath) ?? importedAssetPath);
+	const absoluteFromImportedAsset = normalizeImportedTexturePath(join(dirname(importedLocalPath), normalizedTexturePath));
+	return getProjectRelativeTexturePath(absoluteFromImportedAsset, projectRoot);
+}
+
 export async function tryConvertSceneFile(absolutePath: string, progress?: (percent: number) => void) {
 	const toolsUrl = process.env.EDITOR_TOOLS_URL ?? "https://editor.babylonjs.com";
 	const buffer = (await readFile(absolutePath)) as Buffer;
@@ -62,7 +139,26 @@ export async function tryConvertSceneFile(absolutePath: string, progress?: (perc
 	}
 }
 
-export async function loadImportedSceneFile(scene: Scene, absolutePath: string) {
+/**
+ * 定义导入场景文件时需要覆盖的编辑器处理选项。
+ */
+export interface ILoadImportedSceneFileOptions {
+	/**
+	 * 是否保留导入根节点的原始缩放。
+	 * @deprecated 导入链路默认保留真实尺寸，该选项仅兼容旧调用方。
+	 */
+	preserveRootScaling?: boolean;
+	/**
+	 * 导入底层加载失败时的错误回调，用于业务入口写入更清晰的日志。
+	 */
+	onError?: (error: unknown) => void;
+	/**
+	 * 是否跳过通用导入失败提示，避免业务入口重复弹出错误。
+	 */
+	suppressFailureToast?: boolean;
+}
+
+export async function loadImportedSceneFile(scene: Scene, absolutePath: string, options?: ILoadImportedSceneFileOptions) {
 	if (!projectConfiguration.path) {
 		return null;
 	}
@@ -76,13 +172,15 @@ export async function loadImportedSceneFile(scene: Scene, absolutePath: string) 
 		// result = await SceneLoader.ImportMeshAsync("", join(dirname(absolutePath), "/"), basename(absolutePath), scene);
 	} catch (e) {
 		console.error(e);
-		toast.error("Failed to load the scene file.");
+		options?.onError?.(e);
+		if (!options?.suppressFailureToast) {
+			toast.error("Failed to load the scene file.");
+		}
 		return null;
 	}
 
 	const root = result.meshes.find((m) => m.name === "__root__");
 	if (root) {
-		root.scaling.scaleInPlace(100);
 		root.name = basename(absolutePath);
 
 		// TODO: try cleaning the gltf to remove useless transform nodes. Also, does it make sens to clean the gltf for the user?
@@ -166,7 +264,7 @@ export async function loadImportedSceneFile(scene: Scene, absolutePath: string) 
 
 				configuredEmbeddedTextures.push(texture.uniqueId);
 
-				configureImportedTexture(texture);
+				configureImportedTexture(texture, false, absolutePath);
 				configureEmbeddedTexture(texture, absolutePath);
 			}
 		});
@@ -190,16 +288,26 @@ export function configureImportedMaterial(material: Material) {
 	material.uniqueId = UniqueNumber.Get();
 }
 
-export function configureImportedTexture<T extends Texture | CubeTexture | ColorGradingTexture | HDRCubeTexture>(texture: T, noCheckInvertY?: boolean): T {
-	if (isAbsolute(texture.name)) {
-		if (!noCheckInvertY && isTexture(texture) && !texture.invertY && !texture._buffer) {
+/**
+ * 统一导入贴图的持久化路径，避免编辑预览能显示但 Play 模式找不到模型目录相对贴图。
+ */
+export function configureImportedTexture<T extends Texture | CubeTexture | ColorGradingTexture | HDRCubeTexture>(texture: T, noCheckInvertY?: boolean, importedAssetPath?: string): T {
+	const sourcePath = [texture.url, texture.name].find((value) => value && !isRuntimeOnlyTexturePath(value));
+	if (!sourcePath) {
+		return texture;
+	}
+
+	const sourceLocalPath = normalizeImportedTexturePath(getLocalPathFromFileUrl(sourcePath) ?? sourcePath);
+	const relativePath = getImportedTextureProjectRelativePath(sourcePath, importedAssetPath);
+	if (relativePath) {
+		if (isAbsolute(sourceLocalPath) && !noCheckInvertY && isTexture(texture) && !texture.invertY && !texture._buffer) {
 			texture._invertY = true;
 			texture.vScale *= -1;
-			texture.updateURL(texture.name);
+			texture.updateURL(sourceLocalPath);
 		}
 
-		texture.name = texture.name.replace(join(dirname(projectConfiguration.path!), "/"), "");
-		texture.url = texture.name;
+		texture.name = relativePath;
+		texture.url = relativePath;
 	}
 
 	return texture;

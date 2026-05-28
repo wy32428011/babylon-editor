@@ -14,6 +14,8 @@ import { toast } from "sonner";
 
 import { Vector2, Vector3, Color3, Color4, Texture, CubeTexture } from "babylonjs";
 import {
+	applyModelSidecarParametersToObject,
+	ModelSidecarParametersApplyReason,
 	VisibleInInspectorDecoratorEntityConfiguration,
 	VisibleInInspectorDecoratorStringConfiguration,
 	VisibleInspectorDecoratorAssetConfiguration,
@@ -54,6 +56,8 @@ const cachedScripts: Record<
 	{
 		time: number;
 		output: VisibleInInspectorDecoratorObject[] | null;
+		outputAbsolutePath: string;
+		scriptExports?: any;
 	}
 > = {};
 
@@ -88,6 +92,7 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 		if (output) {
 			computeDefaultValuesForObject(props.script, output);
 			setOutput(output);
+			handleApplyModelSidecarParameters();
 		}
 
 		return () => {
@@ -164,6 +169,8 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 			cachedScripts[srcAbsolutePath] = {
 				time: fStat.mtimeMs,
 				output: extractOutput,
+				outputAbsolutePath,
+				scriptExports: undefined,
 			};
 
 			if (extractOutput) {
@@ -172,6 +179,7 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 		}
 
 		setOutput(cachedScripts[srcAbsolutePath]?.output);
+		handleApplyModelSidecarParameters();
 	}
 
 	function getEntityInspector(value: VisibleInInspectorDecoratorObject) {
@@ -194,11 +202,7 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 						onChange={(v) => {
 							const oldValue = props.script[scriptValues][value.propertyKey].value;
 
-							registerUndoRedo({
-								executeRedo: true,
-								undo: () => (props.script[scriptValues][value.propertyKey].value = oldValue),
-								redo: () => (props.script[scriptValues][value.propertyKey].value = v?.id),
-							});
+							registerParameterValueUndoRedo(value.propertyKey, oldValue, v?.id);
 						}}
 					/>
 				);
@@ -207,6 +211,7 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 				return (
 					<EditorInspectorListField
 						key={value.propertyKey}
+						noUndoRedo={isModelSidecarParametersScript()}
 						object={props.script[scriptValues][value.propertyKey]}
 						property="value"
 						label={value.label ?? value.propertyKey}
@@ -216,6 +221,11 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 							value: animationGroup.name,
 						}))}
 						search={props.editor.layout.preview.scene.animationGroups.length > 5}
+						onChange={(newValue, oldValue) => {
+							if (isModelSidecarParametersScript()) {
+								registerParameterValueUndoRedo(value.propertyKey, oldValue, newValue);
+							}
+						}}
 					/>
 				);
 		}
@@ -254,11 +264,7 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 				onChange={(v) => {
 					const oldSerializedTexture = props.script[scriptValues][value.propertyKey].value;
 
-					registerUndoRedo({
-						executeRedo: true,
-						undo: () => (props.script[scriptValues][value.propertyKey].value = oldSerializedTexture),
-						redo: () => (props.script[scriptValues][value.propertyKey].value = v?.serialize() ?? null),
-					});
+					registerParameterValueUndoRedo(value.propertyKey, oldSerializedTexture, v?.serialize() ?? null);
 
 					setUpdateId(updateId + 1);
 				}}
@@ -269,6 +275,108 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 	function handleCopyName(): void {
 		clipboard.writeText(props.script.key);
 		toast.success("名称已复制到剪贴板。");
+	}
+
+	/**
+	 * 判断当前脚本是否是模型参数脚本，只有该类脚本需要在 Inspector 变更时实时应用。
+	 */
+	function isModelSidecarParametersScript(): boolean {
+		return props.script.root === "project" && props.script.kind === "params";
+	}
+
+	/**
+	 * 克隆脚本字段值，避免撤销/重做记录被后续数组或对象引用修改污染。
+	 * @param value 定义需要记录的脚本字段值。
+	 */
+	function cloneParameterValue<T>(value: T): T {
+		if (value === null || value === undefined || typeof value !== "object") {
+			return value;
+		}
+
+		return cloneJSObject(value);
+	}
+
+	/**
+	 * 设置脚本字段值，并保持数组、对象等复合值互不共享引用。
+	 * @param propertyKey 定义脚本字段名。
+	 * @param value 定义即将写入的字段值。
+	 */
+	function setParameterValue(propertyKey: string, value: any): void {
+		props.script[scriptValues][propertyKey].value = cloneParameterValue(value);
+	}
+
+	/**
+	 * 注册脚本字段撤销/重做，并在每次状态切换后重新应用模型参数。
+	 * @param propertyKey 定义脚本字段名。
+	 * @param oldValue 定义撤销时恢复的旧值。
+	 * @param newValue 定义重做时应用的新值。
+	 */
+	function registerParameterValueUndoRedo(propertyKey: string, oldValue: any, newValue: any): void {
+		const oldValueCopy = cloneParameterValue(oldValue);
+		const newValueCopy = cloneParameterValue(newValue);
+
+		registerUndoRedo({
+			executeRedo: true,
+			undo: () => {
+				setParameterValue(propertyKey, oldValueCopy);
+				handleApplyModelSidecarParameters();
+			},
+			redo: () => {
+				setParameterValue(propertyKey, newValueCopy);
+				handleApplyModelSidecarParameters();
+			},
+		});
+	}
+
+	/**
+	 * 临时加载编译后的参数脚本，并调用约定的 onApplyParameters 入口。
+	 * @param reason 定义本次应用来自编辑器还是运行时，编辑器侧固定传入 editor。
+	 */
+	function handleApplyModelSidecarParameters(reason: ModelSidecarParametersApplyReason = "editor"): void {
+		if (!isModelSidecarParametersScript() || !projectConfiguration.path) {
+			return;
+		}
+
+		const cached = cachedScripts[srcAbsolutePath];
+		if (!cached?.outputAbsolutePath) {
+			return;
+		}
+
+		try {
+			if (!cached.scriptExports) {
+				const outputAbsolutePath = require.resolve(cached.outputAbsolutePath);
+				delete require.cache[outputAbsolutePath];
+				cached.scriptExports = require(outputAbsolutePath);
+			}
+
+			const rootUrl = join(dirname(projectConfiguration.path), "/");
+			applyModelSidecarParametersToObject(props.editor.layout.preview.scene as any, props.object, props.script, cached.scriptExports, rootUrl, reason);
+			refreshModelSidecarBounds();
+		} catch (e) {
+			console.error(`Failed to apply model sidecar parameters for script "${props.script.key}".`, e);
+		}
+	}
+
+	/**
+	 * 参数脚本修改内部部件缩放后刷新世界矩阵和包围盒，保证选框、聚焦和渲染使用最新尺寸。
+	 */
+	function refreshModelSidecarBounds(): void {
+		props.object.computeWorldMatrix?.(true);
+
+		const childMeshes = props.object.getChildMeshes?.(false) ?? [];
+		const meshes = props.object.getTotalVertices ? [props.object, ...childMeshes] : childMeshes;
+		meshes.forEach((mesh) => {
+			mesh.computeWorldMatrix?.(true);
+			if ((mesh.getTotalVertices?.() ?? 0) > 0) {
+				mesh.refreshBoundingInfo?.({
+					applyMorph: true,
+					applySkeleton: true,
+					updatePositionsArray: true,
+				});
+			}
+		});
+
+		props.editor.layout.preview.scene.render();
 	}
 
 	return (
@@ -315,6 +423,12 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 										property="value"
 										label={value.label ?? value.propertyKey}
 										tooltip={value.configuration.description}
+										noUndoRedo={isModelSidecarParametersScript()}
+										onChange={(v) => {
+											if (isModelSidecarParametersScript()) {
+												registerParameterValueUndoRedo(value.propertyKey, !v, v);
+											}
+										}}
 									/>
 								);
 
@@ -329,6 +443,13 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 										max={value.configuration.max}
 										step={value.configuration.step}
 										tooltip={value.configuration.description}
+										noUndoRedo={isModelSidecarParametersScript()}
+										onChange={() => handleApplyModelSidecarParameters()}
+										onFinishChange={(newValue, oldValue) => {
+											if (isModelSidecarParametersScript()) {
+												registerParameterValueUndoRedo(value.propertyKey, oldValue, newValue);
+											}
+										}}
 									/>
 								);
 
@@ -341,6 +462,13 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 										label={value.label ?? value.propertyKey}
 										tooltip={value.configuration.description}
 										multiline={(value.configuration as VisibleInInspectorDecoratorStringConfiguration).multiline}
+										noUndoRedo={isModelSidecarParametersScript()}
+										onChange={() => handleApplyModelSidecarParameters()}
+										onFinishChange={(newValue, oldValue) => {
+											if (isModelSidecarParametersScript()) {
+												registerParameterValueUndoRedo(value.propertyKey, oldValue, newValue);
+											}
+										}}
 									/>
 								);
 
@@ -365,16 +493,13 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 											const scriptCopy = cloneJSObject(props.script);
 
 											props.script[scriptValues][value.propertyKey].value = tempVector.value.asArray();
+											handleApplyModelSidecarParameters();
 											props.script[scriptValues][value.propertyKey].value = scriptCopy[scriptValues][value.propertyKey].value;
 										}}
 										onFinishChange={() => {
 											const oldValue = props.script[scriptValues][value.propertyKey].value.slice();
 
-											registerUndoRedo({
-												executeRedo: true,
-												undo: () => (props.script[scriptValues][value.propertyKey].value = oldValue),
-												redo: () => (props.script[scriptValues][value.propertyKey].value = tempVector.value.asArray()),
-											});
+											registerParameterValueUndoRedo(value.propertyKey, oldValue, tempVector.value.asArray());
 										}}
 										tooltip={value.configuration.description}
 									/>
@@ -402,16 +527,13 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 											const scriptCopy = cloneJSObject(props.script);
 
 											props.script[scriptValues][value.propertyKey].value = tempColor.value.asArray();
+											handleApplyModelSidecarParameters();
 											props.script[scriptValues][value.propertyKey].value = scriptCopy[scriptValues][value.propertyKey].value;
 										}}
 										onFinishChange={() => {
 											const oldValue = props.script[scriptValues][value.propertyKey].value.slice();
 
-											registerUndoRedo({
-												executeRedo: true,
-												undo: () => (props.script[scriptValues][value.propertyKey].value = oldValue),
-												redo: () => (props.script[scriptValues][value.propertyKey].value = tempColor.value.asArray()),
-											});
+											registerParameterValueUndoRedo(value.propertyKey, oldValue, tempColor.value.asArray());
 										}}
 										tooltip={value.configuration.description}
 									/>
@@ -424,7 +546,8 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 										value={props.script[scriptValues][value.propertyKey]?.value?.toString() ?? ""}
 										label={value.label ?? value.propertyKey}
 										onChange={(v) => {
-											props.script[scriptValues][value.propertyKey].value = v;
+											const oldValue = props.script[scriptValues][value.propertyKey].value;
+											registerParameterValueUndoRedo(value.propertyKey, oldValue, v);
 										}}
 									/>
 								);
@@ -439,12 +562,18 @@ export function InspectorScriptField(props: IInspectorScriptFieldProps) {
 								return (
 									<EditorInspectorAssetField
 										key={value.propertyKey}
+										noUndoRedo={isModelSidecarParametersScript()}
 										object={props.script[scriptValues][value.propertyKey]}
 										property="value"
 										assetType={(value.configuration as VisibleInspectorDecoratorAssetConfiguration).assetType}
 										label={value.label ?? value.propertyKey}
 										tooltip={value.configuration.description}
 										typeRestriction={(value.configuration as VisibleInspectorDecoratorAssetConfiguration).typeRestriction}
+										onChange={(newValue, oldValue) => {
+											if (isModelSidecarParametersScript()) {
+												registerParameterValueUndoRedo(value.propertyKey, oldValue, newValue);
+											}
+										}}
 									/>
 								);
 
