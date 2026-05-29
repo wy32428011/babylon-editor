@@ -9,7 +9,7 @@ import { Grid } from "react-loader-spinner";
 
 import { FaCheck } from "react-icons/fa6";
 import { IoIosStats } from "react-icons/io";
-import { LuChevronDown, LuEye, LuFileInput, LuGrid3X3, LuMove3D, LuRotate3D, LuRotateCwSquare, LuScale3D, LuSquareDashedMousePointer } from "react-icons/lu";
+import { LuChevronDown, LuEye, LuFileInput, LuGrid3X3, LuMap, LuMove3D, LuRotate3D, LuRotateCwSquare, LuScale3D, LuSquareDashedMousePointer } from "react-icons/lu";
 import { GiArrowCursor, GiTeapot, GiWireframeGlobe } from "react-icons/gi";
 
 import {
@@ -138,6 +138,10 @@ const IMPORTED_MODEL_BOUNDS_MAX_DIMENSION = 1000000000;
 const CAD_AUTO_FOCUS_MAX_DIMENSION = 10000000;
 const CAD_CAMERA_MAX_Z = 1000000000;
 const CAD_CAMERA_MAX_Z_MULTIPLIER = 8;
+const GROUND_OVERVIEW_DEFAULT_SIZE = 100;
+const GROUND_OVERVIEW_MIN_CAMERA_HEIGHT = 20;
+const GROUND_OVERVIEW_PADDING = 1.2;
+const GROUND_OVERVIEW_DIRECTION_EPSILON = 0.001;
 const PREVIEW_GRID_NAME = "__editor_preview_placement_grid__";
 const PREVIEW_GRID_RENDER_SIZE = 100000;
 const PREVIEW_GRID_MAJOR_STEP = 100;
@@ -172,6 +176,13 @@ interface IImportedModelFitBounds {
 	size: Vector3;
 	maxDimension: number;
 	bottomCenter: Vector3;
+}
+
+interface IGroundOverviewBounds {
+	center: Vector3;
+	width: number;
+	depth: number;
+	maxDimension: number;
 }
 
 interface ICadImportConfigurationState {
@@ -645,6 +656,33 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	}
 
 	/**
+	 * 将当前预览相机移动到场景地面正上方，方便俯瞰 CAD 和模型布置关系。
+	 */
+	public focusGroundOverview(): void {
+		const camera = this.scene?.activeCamera;
+		if (!camera) {
+			toast.error("当前场景没有可用相机。");
+			return;
+		}
+
+		const bounds = this._getGroundOverviewBounds();
+		const target = new Vector3(bounds.center.x, 0, bounds.center.z);
+		const height = this._getGroundOverviewCameraHeight(camera, bounds);
+		const position = new Vector3(target.x, height, target.z + Math.max(height * GROUND_OVERVIEW_DIRECTION_EPSILON, 0.01));
+
+		const nextMaxZ = Math.min(CAD_CAMERA_MAX_Z, Math.max(camera.maxZ, height * 4, bounds.maxDimension * 4));
+		if (Number.isFinite(nextMaxZ) && nextMaxZ > camera.maxZ) {
+			camera.maxZ = nextMaxZ;
+		}
+
+		Tween.create(camera, 0.5, {
+			position,
+			target,
+			killAllTweensOfTarget: true,
+		});
+	}
+
+	/**
 	 * Tries to focused the given object or the first one selected in the graph.
 	 */
 	public focusObject(object?: any): void {
@@ -774,6 +812,99 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 					center: Vector3.Center(minimum, maximum),
 				}
 			: null;
+	}
+
+	/**
+	 * 计算俯瞰地面时需要覆盖的 XZ 范围，排除编辑器预览网格和其它可重建 helper。
+	 */
+	private _getGroundOverviewBounds(): IGroundOverviewBounds {
+		let minimumX: number | null = null;
+		let maximumX: number | null = null;
+		let minimumZ: number | null = null;
+		let maximumZ: number | null = null;
+
+		this.scene.meshes.forEach((mesh) => {
+			if (!this._isGroundOverviewMesh(mesh)) {
+				return;
+			}
+
+			mesh.computeWorldMatrix(true);
+			mesh.refreshBoundingInfo({
+				applyMorph: true,
+				applySkeleton: true,
+				updatePositionsArray: true,
+			});
+
+			const box = mesh.getBoundingInfo().boundingBox;
+			if (!isRenderableBoundingBox(box.minimumWorld, box.maximumWorld)) {
+				return;
+			}
+
+			minimumX = minimumX === null ? box.minimumWorld.x : Math.min(minimumX, box.minimumWorld.x);
+			maximumX = maximumX === null ? box.maximumWorld.x : Math.max(maximumX, box.maximumWorld.x);
+			minimumZ = minimumZ === null ? box.minimumWorld.z : Math.min(minimumZ, box.minimumWorld.z);
+			maximumZ = maximumZ === null ? box.maximumWorld.z : Math.max(maximumZ, box.maximumWorld.z);
+		});
+
+		if (minimumX === null || maximumX === null || minimumZ === null || maximumZ === null) {
+			const cameraTarget = (this.scene.activeCamera as Camera & { target?: unknown } | null)?.target;
+			const center = isVector3(cameraTarget) && isFiniteVector3(cameraTarget) ? cameraTarget.clone() : Vector3.Zero();
+			center.y = 0;
+			return {
+				center,
+				width: GROUND_OVERVIEW_DEFAULT_SIZE,
+				depth: GROUND_OVERVIEW_DEFAULT_SIZE,
+				maxDimension: GROUND_OVERVIEW_DEFAULT_SIZE,
+			};
+		}
+
+		const width = Math.max(maximumX - minimumX, GROUND_OVERVIEW_DEFAULT_SIZE);
+		const depth = Math.max(maximumZ - minimumZ, GROUND_OVERVIEW_DEFAULT_SIZE);
+		return {
+			center: new Vector3((minimumX + maximumX) * 0.5, 0, (minimumZ + maximumZ) * 0.5),
+			width,
+			depth,
+			maxDimension: Math.max(width, depth),
+		};
+	}
+
+	/**
+	 * 判断网格是否应参与俯瞰范围计算。
+	 * @param mesh 定义待检查的场景网格。
+	 */
+	private _isGroundOverviewMesh(mesh: AbstractMesh): boolean {
+		const metadata = mesh.metadata as
+			| {
+					cadGenerated?: unknown;
+					cadGround?: unknown;
+					cadLayer?: unknown;
+					doNotSerialize?: unknown;
+					editorPreviewGrid?: unknown;
+			  }
+			| undefined;
+		if (metadata?.editorPreviewGrid || isCollisionMesh(mesh) || isCollisionInstancedMesh(mesh) || mesh.getTotalVertices() <= 0) {
+			return false;
+		}
+
+		if (metadata?.doNotSerialize && !metadata.cadGenerated && !metadata.cadGround && !metadata.cadLayer) {
+			return false;
+		}
+
+		return !mesh.isDisposed();
+	}
+
+	/**
+	 * 根据场景地面范围和当前相机视锥估算俯瞰高度。
+	 * @param camera 定义当前预览相机。
+	 * @param bounds 定义需要覆盖的地面范围。
+	 */
+	private _getGroundOverviewCameraHeight(camera: Camera, bounds: IGroundOverviewBounds): number {
+		const fov = Number.isFinite(camera.fov) && camera.fov > 0 ? camera.fov : Math.PI / 4;
+		const aspect = Math.max(this.engine?.getAspectRatio(camera) ?? 1, 0.1);
+		const tanHalfFov = Math.max(Math.tan(fov * 0.5), 0.1);
+		const verticalHeight = bounds.depth / (2 * tanHalfFov);
+		const horizontalHeight = bounds.width / (2 * tanHalfFov * aspect);
+		return Math.max(GROUND_OVERVIEW_MIN_CAMERA_HEIGHT, Math.max(verticalHeight, horizontalHeight) * GROUND_OVERVIEW_PADDING);
 	}
 
 	/**
@@ -1768,6 +1899,15 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 					<EditorPreviewGizmoSettings editor={this.props.editor} />
 
 					<Separator orientation="vertical" className="mx-1 h-[24px]" />
+
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button variant="ghost" className="px-1 py-1 w-9 h-9" aria-label="俯瞰地面" title="俯瞰地面" onClick={() => this.focusGroundOverview()}>
+								<LuMap className="w-5 h-5" strokeWidth={2} />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent>俯瞰地面</TooltipContent>
+					</Tooltip>
 
 					<Tooltip>
 						<TooltipTrigger asChild>
