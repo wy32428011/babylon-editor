@@ -1560,6 +1560,7 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 			safeMode: this.props.editor.state.safeOpenMode,
 		});
 		await restoreCadGroundReferences(this.props.editor, this.props.editor.layout.preview.scene, directory);
+		this.props.editor.layout.preview.syncCadGroundReferenceVisibility();
 
 		await this.props.editor.layout.graph.refresh();
 

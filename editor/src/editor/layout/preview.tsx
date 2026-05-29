@@ -9,7 +9,7 @@ import { Grid } from "react-loader-spinner";
 
 import { FaCheck } from "react-icons/fa6";
 import { IoIosStats } from "react-icons/io";
-import { LuChevronDown, LuFileInput, LuGrid3X3, LuMove3D, LuRotate3D, LuRotateCwSquare, LuScale3D, LuSquareDashedMousePointer } from "react-icons/lu";
+import { LuChevronDown, LuEye, LuFileInput, LuGrid3X3, LuMove3D, LuRotate3D, LuRotateCwSquare, LuScale3D, LuSquareDashedMousePointer } from "react-icons/lu";
 import { GiArrowCursor, GiTeapot, GiWireframeGlobe } from "react-icons/gi";
 
 import {
@@ -153,6 +153,7 @@ const PREVIEW_GRID_FLASH_MAIN_COLOR = new Color3(0.56, 0.6, 0.62);
 const PREVIEW_GRID_BASE_LINE_COLOR = new Color3(0.72, 0.72, 0.72);
 const PREVIEW_GRID_FLASH_LINE_COLOR = new Color3(0.34, 0.86, 1);
 const CAD_DWG_CONVERTER_PATH_STORAGE_KEY = "babylonjs-editor-cad-dwg-converter-path";
+const CAD_GROUND_REFERENCE_VISIBLE_STORAGE_KEY = "babylonjs-editor-cad-ground-reference-visible";
 const PREVIEW_GRID_SIZE_OPTIONS: { label: string; value: PlacementGridSize; divisions: number }[] = [
 	{ label: "小格 25 m", value: "4x4", divisions: 4 },
 	{ label: "小格 12.5 m", value: "8x8", divisions: 8 },
@@ -282,6 +283,29 @@ function trySetCadDwgConverterPathToLocalStorage(converterPath: string): void {
 	}
 }
 
+/**
+ * 读取 CAD 地面参考层显示偏好，缺省保持显示，避免已有项目打开后看不到参考图。
+ */
+function tryGetCadGroundReferenceVisibleFromLocalStorage(): boolean {
+	try {
+		return window.localStorage.getItem(CAD_GROUND_REFERENCE_VISIBLE_STORAGE_KEY) !== "false";
+	} catch (e) {
+		return true;
+	}
+}
+
+/**
+ * 将 CAD 地面参考层显示偏好写入本机存储。
+ * @param visible 定义 CAD 地面参考层是否显示。
+ */
+function trySetCadGroundReferenceVisibleToLocalStorage(visible: boolean): void {
+	try {
+		window.localStorage.setItem(CAD_GROUND_REFERENCE_VISIBLE_STORAGE_KEY, String(visible));
+	} catch (e) {
+		// 浏览器隐私配置可能禁用 localStorage，显示开关失败时只影响下次默认值。
+	}
+}
+
 export interface IEditorPreviewProps {
 	/**
 	 * The editor reference.
@@ -302,6 +326,7 @@ export interface IEditorPreviewState {
 	showStatsValues: boolean;
 	showSceneHelperIcons: boolean;
 	showPlacementGrid: boolean;
+	showCadGroundReference: boolean;
 	placementGridSize: PlacementGridSize;
 	cadImportConfiguration?: ICadImportConfigurationState;
 	statsValues?: StatsValuesType;
@@ -404,6 +429,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			showStatsValues: false,
 			showSceneHelperIcons: false,
 			showPlacementGrid: true,
+			showCadGroundReference: tryGetCadGroundReferenceVisibleFromLocalStorage(),
 			placementGridSize: tryGetPreviewPlacementGridSizeFromLocalStorage(),
 
 			playEnabled: false,
@@ -609,6 +635,13 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 				this._syncPlacementGridToCamera();
 			}
 		}
+	}
+
+	/**
+	 * 按当前工具栏开关同步 CAD 地面参考层显隐，供项目加载恢复 CAD 后调用。
+	 */
+	public syncCadGroundReferenceVisibility(): void {
+		this._syncCadGroundReferenceVisibility(this.state.showCadGroundReference);
 	}
 
 	/**
@@ -998,6 +1031,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 
 		this.axis?.start();
 		this._setPlacementGridVisible(this.state.showPlacementGrid);
+		this.syncCadGroundReferenceVisibility();
 		if (this.state.showSceneHelperIcons) {
 			this.icons?.start();
 		}
@@ -1156,6 +1190,54 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		}
 
 		this.setState({ showPlacementGrid: visible });
+	}
+
+	/**
+	 * 设置 CAD 地面参考层显隐，并保存为本机偏好。
+	 * @param visible 定义是否显示 CAD 地面参考层。
+	 */
+	private _setCadGroundReferenceVisible(visible: boolean): void {
+		trySetCadGroundReferenceVisibleToLocalStorage(visible);
+		this._syncCadGroundReferenceVisibility(visible);
+		this.setState({ showCadGroundReference: visible });
+	}
+
+	/**
+	 * 同步当前场景内 CAD 派生参考对象显隐，保留 CAD 根节点用于 Graph 选择和 metadata 保存。
+	 * @param visible 定义是否显示 CAD 地面参考层。
+	 */
+	private _syncCadGroundReferenceVisibility(visible: boolean): void {
+		if (!this.scene) {
+			return;
+		}
+
+		const cadNodes = [...this.scene.transformNodes, ...this.scene.meshes].filter((node) => this._isCadGroundReferenceVisibilityTarget(node));
+		cadNodes.forEach((node) => node.setEnabled(visible));
+	}
+
+	/**
+	 * 判断节点是否属于可隐藏的 CAD 地面参考派生对象。
+	 * @param node 定义待检查的场景节点。
+	 */
+	private _isCadGroundReferenceVisibilityTarget(node: Node): boolean {
+		const metadata = node.metadata as
+			| {
+					cadGenerated?: unknown;
+					cadGround?: unknown;
+					cadLayer?: unknown;
+					cadDrawing?: { displayMode?: unknown };
+			  }
+			| undefined;
+		if (!metadata) {
+			return false;
+		}
+
+		if (metadata.cadGenerated || metadata.cadGround || metadata.cadLayer) {
+			return true;
+		}
+
+		const displayMode = typeof metadata.cadDrawing?.displayMode === "string" ? metadata.cadDrawing.displayMode : "";
+		return isAbstractMesh(node) && (displayMode === "reference-image" || displayMode === "ground-dynamic-texture");
 	}
 
 	/**
@@ -1694,6 +1776,21 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 							</Button>
 						</TooltipTrigger>
 						<TooltipContent>导入 CAD 图纸</TooltipContent>
+					</Tooltip>
+
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Toggle
+								className={this.state.showCadGroundReference ? "!px-2 !py-2 bg-primary/20" : "!px-2 !py-2"}
+								pressed={this.state.showCadGroundReference}
+								aria-label="显示/隐藏 CAD 参考图"
+								title="显示/隐藏 CAD 参考图"
+								onPressedChange={(pressed) => this._setCadGroundReferenceVisible(pressed)}
+							>
+								<LuEye className="w-5 h-5" strokeWidth={2} />
+							</Toggle>
+						</TooltipTrigger>
+						<TooltipContent>显示/隐藏 CAD 参考图</TooltipContent>
 					</Tooltip>
 
 					<Tooltip>
@@ -2270,6 +2367,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			});
 
 			await this._selectImportedCadDrawingRoot(result.root);
+			this.syncCadGroundReferenceVisibility();
 			this.props.editor.layout.assets.refresh();
 			this._setCadImportProgress(normalizedSourcePath, "CAD 图纸导入完成", 100);
 			this.props.editor.layout.console.log(

@@ -53,6 +53,7 @@ export default class SceneEditorWindow extends Component<ISceneEditorWindowProps
 
 		await loadScene(this._editor, directory, this.props.scenePath, { safeMode });
 		await restoreCadGroundReferences(this._editor, this._editor.layout.preview.scene, directory);
+		this._editor.layout.preview.syncCadGroundReferenceVisibility();
 
 		this._editor.layout.graph.refresh();
 		this._editor.layout.inspector.setEditedObject(this._editor.layout.preview.scene);

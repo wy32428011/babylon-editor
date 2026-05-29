@@ -75,6 +75,7 @@ export async function loadProject(editor: Editor, path: string) {
 
 		await loadScene(editor, directory, absolutePath, { safeMode });
 		await restoreCadGroundReferences(editor, editor.layout.preview.scene, directory);
+		editor.layout.preview.syncCadGroundReferenceVisibility();
 
 		editor.layout.preview.scene.onBeforeRenderObservable.addOnce(() => {
 			editor.layout.graph.refresh();
